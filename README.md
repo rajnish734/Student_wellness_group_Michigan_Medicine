@@ -1,1 +1,1 @@
-# Student_wellness_group_Michigan_Medicine
+# Student_wellness_group_Wearables_Michigan_Medicine
