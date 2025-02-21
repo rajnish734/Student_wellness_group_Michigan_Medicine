@@ -319,19 +319,7 @@ Note -- Those values of the measurements will belong at the end of the minute, a
 library(dplyr)
 library(lubridate)
 
-hr_60 <- hr_60 %>%
-  mutate(
-    MSR_DT = as.Date(STUDY_METRIC_MSR_START_DT),
-    MSR_TIME = format(STUDY_METRIC_MSR_START_DT, "%H:%M:%S")
-  )
 
-# Check the result
-print(head(hr_60))
-``` 
-```{r}
-
-hr_60$MSR_TIME_POSIXct <- as.POSIXct(paste(hr_60$MSR_DT, hr_60$MSR_TIME))
-```
 
 ```{r}
 
