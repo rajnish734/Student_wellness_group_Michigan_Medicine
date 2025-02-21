@@ -1,0 +1,440 @@
+---
+title: "Analysis_SWG"
+author: "Rajnish Kumar"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r}
+# Data Reading & Manipulation
+library(tidyr)
+library(dplyr)
+library(data.table)
+library(lubridate)
+library(tidyverse)
+library(dplyr)
+
+# Data Visualization
+library(viridis)  # For better color palettes
+library(hrbrthemes)  # For theme_ipsum()
+library(plotly)  # For interactive plots
+library(gtsummary)
+```
+
+
+
+Calculate summary statistics for heart rates and steps for the student wellness group. 
+```{r }
+df_SWG_all <- readRDS("df_COMB_SWG_all_20250110_1248.rds")
+roadmap_IDs <- read.csv("C:\\Users\\rajnishk\\OneDrive - Michigan Medicine\\Documents\\Analysis_projects_R_laptop\\SWG_R_project\\SWG_data\\StudentWellness_RoadmapID.csv")
+dev_IDs <- read.csv("C:\\Users\\rajnishk\\OneDrive - Michigan Medicine\\Documents\\Analysis_projects_R_laptop\\SWG_R_project\\SWG_data\\Device_ID.csv")
+
+```
+
+
+abcd <- df_SWG_all[df_SWG_all$unique_STEP_CNT>17000,] -- if you try this you will find time instant at where STEPS_MSRMNT_VAL is equal to 17460, but there is no heart rate measurement. So make sure to include the condition that HR_msrd_Y_N == 1 before doing any type of plotting etc. This has been implemented for 
+
+```{r}
+roadmap_IDs$onboard_date <- as.Date(roadmap_IDs$onboard_date, format="%m/%d/%y")
+
+```
+
+Creating the summary statistics for heart rate and steps data sets for the group. 
+see if the data frame is in Table format.  
+
+```{r}
+setDT(df_SWG_all)  
+```
+
+
+```{r}
+
+
+library(data.table)
+library(moments) 
+
+# REMOVE THE FOLLOWING FROM GITHUB
+all_participants_SWG_stats <- df_SWG_all[
+  HR_msrd_Y_N == 1 & ACTIVITY_TYPE_VAL != 0,
+  .(
+    # HR statistics
+    hr_mean = mean(HR_MSRMNT_VAL, na.rm = TRUE),
+    hr_sd = sd(HR_MSRMNT_VAL, na.rm = TRUE),
+    hr_skewness = skewness(HR_MSRMNT_VAL, na.rm = TRUE),
+    hr_kurtosis = kurtosis(HR_MSRMNT_VAL, na.rm = TRUE),
+    
+    # Steps statistics
+    steps_sum = sum(STEPS_MSRMNT_VAL, na.rm = TRUE),
+    steps_mean = mean(STEPS_MSRMNT_VAL, na.rm = TRUE),
+    steps_sd = sd(STEPS_MSRMNT_VAL, na.rm = TRUE),
+    steps_skewness = skewness(STEPS_MSRMNT_VAL, na.rm = TRUE),
+    steps_kurtosis = kurtosis(STEPS_MSRMNT_VAL, na.rm = TRUE),
+    
+    n_observations = .N
+  ),
+  by = .(prtcpt_id, day, ACTIVITY_TYPE_VAL)
+]
+# REMOVE UP TO HERE FROM GITHUB
+
+```
+
+Import MOOD, date of entry with time, along with sleep details for the student wellness group. 
+
+```{r}
+df_MOOD_time <- read.csv("C:\\Users\\rajnishk\\OneDrive - Michigan Medicine\\Documents\\Analysis_projects_R_laptop\\SWG_R_project\\SWG_data\\SWG_mood_time_entry.csv")
+df_sleep_details<- read.csv("C:\\Users\\rajnishk\\OneDrive - Michigan Medicine\\Documents\\Analysis_projects_R_laptop\\SWG_R_project\\SWG_data\\student_wellness_sleep_details.csv")
+
+
+```
+
+Just like BMT, let us chekc if the student wellness data set has steps count not equal to zero for sedentary steps type. 
+
+
+```{r}
+prtcpt_stats_4 <- all_participants_SWG_stats[all_participants_SWG_stats$ACTIVITY_TYPE_VAL==4,]
+print("there are a few data points that have non zero values of step count for type == 4. Count of these data points are as follows: ")
+count(prtcpt_stats_4[prtcpt_stats_4$steps_sum!=0,])
+
+```
+I will remove these later in the cleaning process at the minute level, for now, let me just remove those days. 
+
+```{r}
+all_participants_SWG_stats_type_4_filtered <- all_participants_SWG_stats %>% 
+  filter(!(ACTIVITY_TYPE_VAL == 4 & steps_sum != 0))
+```
+
+
+Let us pivot wide the data frame and add the information about dates of the study days so that we can combine it with mood scores. 
+
+
+```{r}
+HR_STEPS_filtered_stats_SWG_all_ptcpt <- all_participants_SWG_stats_type_4_filtered %>%
+  pivot_wider(
+    id_cols = c(prtcpt_id, day),
+    names_from = ACTIVITY_TYPE_VAL,
+    names_glue = "{.value}_type_{ACTIVITY_TYPE_VAL}",
+    values_from = c(hr_mean, hr_sd, hr_skewness, hr_kurtosis, 
+                   steps_sum, steps_mean, steps_sd, 
+                   steps_skewness, steps_kurtosis, n_observations)
+  )
+```
+
+Add the information about dates from the study days then you can run several regression models just with the physilogical signals first. 
+
+```{r}
+# First, let's create a mapping of unique prtcpt_id, day, and date combinations from df_BMT_all
+date_mapping <- df_SWG_all[, .(date = as.Date(msmt_instant)[1]), by = .(prtcpt_id, day)]
+```
+
+Combine this with dev_IDs and date on each of the dates to get csv file for Xiao. 
+```{r}
+# steps_20_SWG <- read.csv("C:\\Users\\rajnishk\\OneDrive - Michigan Medicine\\Documents\\Analysis_projects_R_laptop\\SWG_R_project\\SWG_data\\df_step_20.csv")
+# # Convert date and create new column
+# steps_20_SWG <- steps_20_SWG %>%
+#   mutate(
+#     steps_20_SWG_date = as.Date(STUDY_METRIC_MSR_START_DT)
+#   )
+# # Convert dev_IDs PRTCPT_DVC_ID and STUDY_PRTCPT_ID to a mapping
+# device_mapping <- dev_IDs %>%
+#   select(PRTCPT_DVC_ID, STUDY_PRTCPT_ID) %>%
+#   # If there are duplicates, we might want to take unique combinations
+#   distinct()
+# 
+# # Add the device IDs to date_mapping
+# date_mapping[, PRTCPT_DVC_ID := device_mapping$PRTCPT_DVC_ID[match(prtcpt_id, device_mapping$STUDY_PRTCPT_ID)]]
+# library(dplyr)
+# 
+# # Add STUDY_METRIC_MSR_VAL to date_mapping based on matching conditions
+# date_mapping <- date_mapping %>%
+#   left_join(
+#     steps_20_SWG %>% 
+#       select(PRTCPT_DVC_ID, steps_20_SWG_date, STUDY_METRIC_MSR_VAL),
+#     by = c("PRTCPT_DVC_ID" = "PRTCPT_DVC_ID", "date" = "steps_20_SWG_date")
+#   )
+# library(dplyr)
+# 
+# # Create the fitbit_meas column
+# date_mapping <- date_mapping %>%
+#   mutate(fitbit_meas = !is.na(STUDY_METRIC_MSR_VAL))
+# # Create the Xiao data frame by dropping the STUDY_METRIC_MSR_VAL column
+# Xiao <- date_mapping %>%
+#   select(-STUDY_METRIC_MSR_VAL)
+# 
+# # Write the Xiao data frame to a CSV file
+# write.csv(Xiao, "Xiao.csv", row.names = FALSE)
+
+```
+
+
+
+```{r}
+
+```
+
+
+
+
+```{r}
+HR_STEPS_filtered_stats_SWG_all_ptcpt <- HR_STEPS_filtered_stats_SWG_all_ptcpt %>%
+  left_join(date_mapping, by = c("prtcpt_id", "day"))
+```
+
+
+
+```{r}
+df_MOOD_time <- df_MOOD_time %>% 
+  rename(prtcpt_id = STUDY_PRTCPT_ID) %>%
+  mutate(Date = as.Date(Date))
+
+HR_STEPS_filtered_stats_SWG_all_ptcpt <- HR_STEPS_filtered_stats_SWG_all_ptcpt %>%
+  left_join(
+    df_MOOD_time %>% select(prtcpt_id, Date, INT_SRVY_RSPNS),
+    by = c("prtcpt_id" = "prtcpt_id", "date" = "Date")
+  )
+```
+
+
+
+
+There are some rows where the INT_SRVY_RSPNS value is called "SELECTED". I don't know what that means. Will filter it out probably. 
+
+```{r}
+HR_STEPS_filtered_stats_SWG_all_ptcpt <- HR_STEPS_filtered_stats_SWG_all_ptcpt %>%
+  filter(!(INT_SRVY_RSPNS=="SELECTED"))
+```
+
+A large amount of values where "SELECCTED" as shown here. 
+> table(df_MOOD_time$INT_SRVY_RSPNS)
+
+       1       10        2        3        4        5        6        7        8        9 SELECTED 
+       4       23       19       32       54       89      142      167      167       65      119 
+       
+So the number of rows in HR_STEPS_filtered_stats_SWG_all_ptcpt drastically. 
+
+
+
+Include the demographic data of the group.  
+
+```{r}
+library(readxl)
+SWG_demo <- read_excel("C:\\Users\\rajnishk\\OneDrive - Michigan Medicine\\Documents\\Analysis_projects_R_laptop\\SWG_R_project\\SWG_data\\Student Wellness Demographics.xlsx")
+```
+
+
+
+```{r}
+filtered_SWG_demo <- SWG_demo %>%
+  filter(`Study ID` %in% c("Age", "Female" , "Male" ))
+```
+
+
+
+```{r}
+filtered_SWG_demo_no_identity <- filtered_SWG_demo %>%
+  select(-Identity)
+```
+
+
+
+```{r}
+library(tidyr)
+transposed_demo <- as.data.frame(t(filtered_SWG_demo_no_identity))
+names(transposed_demo) <- transposed_demo[1,]
+transposed_demo <- transposed_demo[-1,]
+```
+
+Removing the row with "Total" value 
+
+```{r}
+transposed_demo <- transposed_demo[-nrow(transposed_demo), ]
+```
+
+Add the demographic to the physiological summary data set. 
+
+```{r}
+HR_STEPS_filtered_stats_SWG_all_ptcpt <- HR_STEPS_filtered_stats_SWG_all_ptcpt %>%
+  rename(MOOD = INT_SRVY_RSPNS) %>%
+  mutate(MOOD = as.numeric(MOOD))
+```
+
+
+```{r}
+# Step 1: Create a mapping between rm_access_code and study_id
+mapping_df <- roadmap_IDs %>%
+  select(study_id, rm_access_code)
+
+# Step 2: Convert transposed_demo to a data frame with study_id as a column
+transposed_demo_with_id <- transposed_demo %>%
+  rownames_to_column('study_id')
+
+# Step 3: Merge mapping with demographic data
+demo_with_codes <- mapping_df %>%
+  left_join(transposed_demo_with_id, by = "study_id")
+
+# Step 4: Finally, merge with the main dataset using rm_access_code to match with prtcpt_id
+HR_STEPS_filtered_stats_SWG_all_ptcpt_with_demo <- HR_STEPS_filtered_stats_SWG_all_ptcpt %>%
+  left_join(demo_with_codes %>% 
+              select(rm_access_code, Age, Female, Male),
+            by = c("prtcpt_id" = "rm_access_code"))
+```
+
+
+```{r}
+# Create a new Gender column with FEMALE/MALE labels
+HR_STEPS_filtered_stats_SWG_all_ptcpt_with_demo <- HR_STEPS_filtered_stats_SWG_all_ptcpt_with_demo %>%
+  mutate(Gender = case_when(
+    Female == "x" ~ "FEMALE",    # If Female column has "x", it's FEMALE
+    Male == "x" ~ "MALE",        # If Male column has "x", it's MALE
+    TRUE ~ NA_character_         # For any other case, set as NA
+  )) %>%
+  # Remove the old Female and Male columns if desired
+  select(-Female, -Male)
+```
+
+
+Rearranging the data frames for a bit. 
+
+```{r}
+
+df_HR_stats_MOOD_demographics <- HR_STEPS_filtered_stats_SWG_all_ptcpt_with_demo %>% 
+  select(prtcpt_id, 
+         hr_mean_type_4, hr_mean_type_5, hr_mean_type_6, hr_mean_type_7,
+         hr_sd_type_4, hr_sd_type_5, hr_sd_type_6, hr_sd_type_7,
+         hr_skewness_type_4, hr_skewness_type_5, hr_skewness_type_6, hr_skewness_type_7,
+         hr_kurtosis_type_4, hr_kurtosis_type_5, hr_kurtosis_type_6, hr_kurtosis_type_7,
+         date, MOOD,Age,Gender)
+
+```
+
+drop the NA values in heart rate
+
+```{r}
+print(nrow(df_HR_stats_MOOD_demographics))
+df_HR_stats_MOOD__demographic_no_NA <- na.omit(df_HR_stats_MOOD_demographics)
+print(nrow(df_HR_stats_MOOD__demographic_no_NA))
+```
+
+
+
+
+```{r}
+print("scaled data frame with demographics")
+df_HR_stats_MOOD__demographics_scaled <- df_HR_stats_MOOD__demographic_no_NA
+cols_to_standardize <- setdiff(names(df_HR_stats_MOOD__demographics_scaled), c("prtcpt_id", "MOOD", "date", "Age","Gender"))
+df_HR_stats_MOOD__demographics_scaled[cols_to_standardize] <- scale(df_HR_stats_MOOD__demographics_scaled[cols_to_standardize])
+head(df_HR_stats_MOOD__demographics_scaled)
+```
+
+
+```{r}
+df_HR_stats_MOOD__demographics_scaled <- df_HR_stats_MOOD__demographics_scaled %>%
+  mutate(Age = as.numeric(Age))
+```
+
+
+```{r}
+library(lme4)
+
+```
+
+
+
+```{r}
+print("Run the model statements")
+```
+
+```{r}
+print("collect all the model details")
+
+# use source("mixed_effect_model_summary_extractor_updated.R")
+```
+print and save all the model details
+
+```{r}
+print("print and save all the model summaries")
+
+source("print_all_model_summaries.R")
+```
+
+
+```{r}
+# Get all model names
+model_names <- unique(all_model_summaries$model_name)
+
+# Function to print summaries with clear separation
+print_all_model_summaries <- function(model_names) {
+  # Create a separator line
+  separator <- paste(rep("=", 80), collapse="")
+
+  for(model_name in model_names) {
+    # Print model name with separator
+    cat("\n", separator, "\n")
+    cat("Summary for:", model_name, "\n")
+    cat(separator, "\n\n")
+
+    # Get the model object and print its summary
+    model_obj <- get(model_name)
+    print(summary(model_obj))
+  }
+}
+
+print ("RUN THE FOLLOWING COMMAND AT THE PROMPT : ")
+# Print summaries for all models
+# print_all_model_summaries(model_names)
+# To save to a file, uncomment and run this line:
+# capture_all_summaries(model_names)
+```
+```{r}
+print_and_save_model_summaries(model_names, 'mixed_models_summaries.txt')
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
