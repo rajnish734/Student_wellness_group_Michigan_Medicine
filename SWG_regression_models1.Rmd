@@ -261,31 +261,9 @@ setDT(df_SWG_all)
 
 
 ```{r}
-all_participants_SWG_stats <- df_SWG_all[
-  # Original conditions
-  HR_msrd_Y_N == 1 & 
-  ACTIVITY_TYPE_VAL != 0 &
-  # New exclusion conditions
-  !(HR_msrd_Y_N == 1 & ACTIVITY_TYPE_VAL == 4 & STEPS_MSRMNT_VAL > 0) &  # condition 1 of sedentary steps
-  !(HR_msrd_Y_N == 1 & STEPS_MSRMNT_VAL > steps_upper_limit),            # condition 2 of impossible number of steps. 
-  .(
-    # HR statistics
-    hr_mean = mean(HR_MSRMNT_VAL, na.rm = TRUE),
-    hr_sd = sd(HR_MSRMNT_VAL, na.rm = TRUE),
-    hr_skewness = skewness(HR_MSRMNT_VAL, na.rm = TRUE),
-    hr_kurtosis = kurtosis(HR_MSRMNT_VAL, na.rm = TRUE),
-    
-    # Steps statistics
-    steps_sum = sum(STEPS_MSRMNT_VAL, na.rm = TRUE),
-    steps_mean = mean(STEPS_MSRMNT_VAL, na.rm = TRUE),
-    steps_sd = sd(STEPS_MSRMNT_VAL, na.rm = TRUE),
-    steps_skewness = skewness(STEPS_MSRMNT_VAL, na.rm = TRUE),
-    steps_kurtosis = kurtosis(STEPS_MSRMNT_VAL, na.rm = TRUE),
-    
-    n_observations = .N
-  ),
-  by = .(prtcpt_id, day, ACTIVITY_TYPE_VAL)
-]
+# REMOVE THIS PORTION
+
+# REMOVE UPTO HERE. 
 ```
 
 
