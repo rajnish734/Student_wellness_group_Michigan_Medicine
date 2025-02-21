@@ -1,0 +1,353 @@
+---
+title: "sample_pipeline"
+author: "Rajnish Kumar"
+date: "2024-09-26"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+Implementing every single step needed to build the data pipeline for clear analysis. 
+
+```{r}
+# Data Reading & Manipulation
+library(tidyr)
+library(dplyr)
+library(data.table)
+library(lubridate)
+library(tidyverse)
+
+# Data Visualization
+library(viridis)  # For better color palettes
+library(hrbrthemes)  # For theme_ipsum()
+library(plotly)  # For interactive plots
+library(gtsummary)
+```
+
+
+```{r}
+
+```
+
+You need to create additional columns for participants IDs in the heart rate and sleep data set, but first see how many devices each of the participants have. 
+Read other IDs etc. 
+
+```{r}
+
+# User-Device Map
+device_ids <- read.csv("/home/rajnishk/clean_data_09_23/Data/IDs/DEVICE_IDS.csv")
+
+
+# Demographic & Clinical Information
+roadmap_ids <- read.csv("/home/rajnishk/clean_data_09_23/Data/IDs/Roadmap 2.0 BMT_roadmapIDs_10.11.2023.csv")
+bmt_demo_data <- read.csv("/home/rajnishk/clean_data_09_23/Data/IDs/bmt_demo_data.csv")
+
+
+## Extract Patient and Caregiver IDs
+patient_ids <- roadmap_ids[roadmap_ids$cohort != "Peds",]$pt_rm_access_code 
+caregiver_ids <- roadmap_ids[roadmap_ids$cohort != "Peds",]$cg_rm_access_code 
+
+## Filter User-Device Map based on Patients and Caregivers
+device_ids <- device_ids[(device_ids$STUDY_PRTCPT_ID %in% c(patient_ids, caregiver_ids)),]
+
+## Extract Patient and Caregiver Device IDs
+patient_device_ids <- (device_ids[device_ids$STUDY_PRTCPT_ID %in% patient_ids,])$PRTCPT_DVC_ID
+caregiver_device_ids <- (device_ids[device_ids$STUDY_PRTCPT_ID %in% caregiver_ids,])$PRTCPT_DVC_ID
+```
+
+
+```{r}
+## Convert date columns to Date format
+roadmap_ids$pt_consent_date <- as.POSIXct(roadmap_ids$pt_consent_date, format = "%m/%d/%y")
+roadmap_ids$pt_day_120 <- as.POSIXct(roadmap_ids$pt_day_120, format = "%m/%d/%y")
+```
+
+
+Dimensions of all these datasets so far: 
+
+```{r}
+# Function to print dimensions of a data frame
+print_dimensions <- function(df_name, df) {
+  cat(paste0(df_name, " dimensions: ", 
+             nrow(df), " rows and ", 
+             ncol(df), " columns\n"))
+}
+
+# Print dimensions for each data frame
+print_dimensions("device_ids", device_ids)
+print_dimensions("roadmap_ids", roadmap_ids)
+print_dimensions("bmt_demo_data", bmt_demo_data)
+
+# For the vectors, we'll print their length
+cat(paste0("patient_ids length: ", length(patient_ids), "\n"))
+cat(paste0("caregiver_ids length: ", length(caregiver_ids), "\n"))
+cat(paste0("patient_device_ids length: ", length(patient_device_ids), "\n"))
+cat(paste0("caregiver_device_ids length: ", length(caregiver_device_ids), "\n"))
+```
+Dropping suspicious devices based on the internal ids. They were found in participants: "M6WWDSQA", "PF1BLPH4", "CFI9I6K2", "6Y54VIY4"
+
+
+```{r}
+# Define the strings you want to remove
+remove_strings <- c("M6WWDSQA", "PF1BLPH4", "CFI9I6K2", "6Y54VIY4")
+
+# Remove rows where STUDY_PRTCPT_ID matches any of the remove_strings
+device_ids_filtered <- device_ids[!device_ids$STUDY_PRTCPT_ID %in% remove_strings, ]
+
+# Check how many rows were removed
+rows_removed <- nrow(device_ids) - nrow(device_ids_filtered)
+print(paste("Number of rows removed:", rows_removed))
+
+# update the original device_ids dataframe:
+device_ids <- device_ids_filtered
+
+#======================================================================================================================================================
+## Extract Patient and Caregiver Device IDs
+patient_device_ids <- (device_ids[device_ids$STUDY_PRTCPT_ID %in% patient_ids,])$PRTCPT_DVC_ID
+caregiver_device_ids <- (device_ids[device_ids$STUDY_PRTCPT_ID %in% caregiver_ids,])$PRTCPT_DVC_ID
+
+```
+
+Dimension of these variables after dropping suspicious devices and ids, due to mismatch in their internal device ids: 
+```{r}
+# Function to print dimensions of a data frame
+print_dimensions <- function(df_name, df) {
+  cat(paste0(df_name, " dimensions: ", 
+             nrow(df), " rows and ", 
+             ncol(df), " columns\n"))
+}
+
+# Print dimensions for each data frame
+print_dimensions("device_ids", device_ids)
+print_dimensions("roadmap_ids", roadmap_ids)
+print_dimensions("bmt_demo_data", bmt_demo_data)
+
+# For the vectors, we'll print their length
+cat(paste0("patient_ids length: ", length(patient_ids), "\n"))
+cat(paste0("caregiver_ids length: ", length(caregiver_ids), "\n"))
+cat(paste0("patient_device_ids length: ", length(patient_device_ids), "\n"))
+cat(paste0("caregiver_device_ids length: ", length(caregiver_device_ids), "\n"))
+```
+
+
+
+```{r}
+
+```
+
+Find out which participants have multiple fitbits. I am dropping the phones from device_ids
+
+```{r}
+library(dplyr)
+
+# Filter out rows where PRTCPT_DVC_TYP_ID is 2
+device_ids_filtered <- device_ids %>%
+  filter(PRTCPT_DVC_TYP_ID != 2)
+
+# If you want to overwrite the original data frame:
+device_ids <- device_ids_filtered
+```
+
+
+```{r}
+
+``` 
+Now seeing which participants have multiple fitbits, and which ones have just one fitbit. 
+
+```{r}
+library(dplyr)
+
+# Count the number of PRTCPT_DVC_ID for each STUDY_PRTCPT_ID
+device_count <- device_ids %>%
+  group_by(STUDY_PRTCPT_ID) %>%
+  summarise(device_count = n_distinct(PRTCPT_DVC_ID)) %>%
+  arrange(desc(device_count))
+
+# View the result
+print(device_count)
+
+# Get some summary statistics
+summary_stats <- summary(device_count$device_count)
+print("Summary statistics of device counts:")
+print(summary_stats)
+
+# Count how many participants have more than one device
+multi_device_count <- sum(device_count$device_count > 1)
+print(paste("Number of participants with more than one device:", multi_device_count))
+
+# If you want to see participants with more than one device:
+multi_device_participants <- device_count %>% filter(device_count > 1)
+print("Participants with more than one device:")
+print(multi_device_participants)
+
+# NEW CODE: Get participants with a single device
+single_device_participants <- device_count %>% filter(device_count == 1)
+print("Participants with a single device:")
+print(single_device_participants)
+
+# Count how many participants have a single device
+single_device_count <- nrow(single_device_participants)
+print(paste("Number of participants with a single device:", single_device_count))
+```
+```{r}
+# library(dplyr)
+# library(bind_rows)
+# 
+# # Select the first 21 rows from single_device_participants
+# single_device_selected <- single_device_participants %>% slice_head(n = 21)
+# 
+# # Concatenate multi_device_participants with the selected single device participants
+# SELECTED_PRTCPT <- bind_rows(multi_device_participants, single_device_selected)
+# 
+# # View the result
+# print(SELECTED_PRTCPT)
+# 
+# # Check the dimensions of the new data frame
+# print(paste("Dimensions of SELECTED_PRTCPT:", nrow(SELECTED_PRTCPT), "rows and", ncol(SELECTED_PRTCPT), "columns"))
+```
+
+```{r}
+library(dplyr)
+
+# Select the first 21 rows from single_device_participants
+single_device_selected <- single_device_participants %>% slice_head(n = 21)
+
+# Concatenate multi_device_participants with the selected single device participants
+SELECTED_PRTCPT <- bind_rows(multi_device_participants, single_device_selected)
+
+# View the result
+print(SELECTED_PRTCPT)
+
+# Check the dimensions of the new data frame
+print(paste("Dimensions of SELECTED_PRTCPT:", nrow(SELECTED_PRTCPT), "rows and", ncol(SELECTED_PRTCPT), "columns"))
+```
+
+
+Read all the files. I will download the sleep details file later for integration. 
+```{r}
+hr <- fread("/home/rajnishk/clean_data_09_23/Data/CSVs/HR_Data_BMT.csv")
+# sleep <- fread("/home/rajnishk/clean_data_09_23/Data/CSVs/Sleep_Data_BMT.csv")
+# steps <- fread("/home/rajnishk/clean_data_09_23/Data/CSVs/Step_Data_BMT.csv")
+```
+
+Now, to create a sample data set that I can work with for now, I will get all participants from multiple fitbits, and 21 from a single fitbit, to make it a rounded number of #participants = 60. 
+1. Add column that connects participants with the HR and steps data set. 
+
+```{r}
+hr <- hr %>%
+  left_join(device_ids %>% select(PRTCPT_DVC_ID, STUDY_PRTCPT_ID), by = "PRTCPT_DVC_ID")
+
+# Check the result
+head(hr)
+```
+hr data frame needs to drop the 4 suspicious participants as well. 
+
+```{r}
+# Check if "M6WWDSQA" is present
+is_present <- "PF1BLPH4" %in% hr$STUDY_PRTCPT_ID
+
+# Print the result
+print(paste("Is 'PF1BLPH4' present in hr$STUDY_PRTCPT_ID?", is_present))
+```
+
+
+
+```{r}
+# Define the strings you want to remove
+remove_strings <- c("M6WWDSQA", "PF1BLPH4", "CFI9I6K2", "6Y54VIY4")
+
+print(paste("current number of rows in the data frame hr",nrow(hr)))
+# Remove rows where STUDY_PRTCPT_ID matches any of the remove_strings
+hr_filtered <- hr %>%
+  filter(!STUDY_PRTCPT_ID %in% remove_strings)
+
+# Check how many rows were removed
+rows_removed <- nrow(hr) - nrow(hr_filtered)
+print(paste("Number of rows removed:", rows_removed))
+
+# If you want to update the original hr dataframe:
+hr <- hr_filtered
+
+# Verify that the strings are no longer in the data frame
+remaining_matches <- hr %>%
+  filter(STUDY_PRTCPT_ID %in% remove_strings) %>%
+  nrow()
+print(paste("Remaining matches:", remaining_matches))
+```
+Now pick the selected 60 STUDY_PRTCPT_ID and select the hr portion for those 60 participants and call it HR_60 for your own record. 
+```{r}
+
+# Get the list of STUDY_PRTCPT_ID from SELECTED_PRTCPT
+selected_ids <- SELECTED_PRTCPT$STUDY_PRTCPT_ID
+
+# Filter hr data frame
+hr_60 <- hr %>%
+  filter(STUDY_PRTCPT_ID %in% selected_ids)
+
+# Check the result
+print(paste("Number of rows in filtered hr data frame:", nrow(hr_60)))
+print(head(hr_60))
+```
+```{r}
+hr_60 <- hr_60 %>%
+  select(-STUDY_METRIC_ID, -STUDY_METRIC_PRTCPTN_IND)
+```
+
+Now I need to apply the date and time conversions to impose the 120 days filter on hr_60, so that I can do indexing after that. This will also give the information as day 1, day2, etc. along with time on 24 hours scale. 
+
+Imposing the 120 day criteria. 
+Note -- Those values of the measurements will belong at the end of the minute, and not at the start time. 
+```{r}
+  # Convert date columns to POSIXct format in device_ids
+  device_ids <- device_ids %>%
+    mutate(
+      PRTCPT_DVC_START_DT = as.POSIXct(PRTCPT_DVC_START_DT, format = "%d-%b-%y %I.%M.%OS %p", tz = "UTC"),
+      PRTCPT_DVC_END_DT = as.POSIXct(PRTCPT_DVC_END_DT, format = "%d-%b-%y %I.%M.%OS %p", tz = "UTC")
+    )
+```
+
+
+```{r}
+library(dplyr)
+library(lubridate)
+
+hr_60 <- hr_60 %>%
+  mutate(
+    MSR_DT = as.Date(STUDY_METRIC_MSR_START_DT),
+    MSR_TIME = format(STUDY_METRIC_MSR_START_DT, "%H:%M:%S")
+  )
+
+# Check the result
+print(head(hr_60))
+``` 
+```{r}
+
+hr_60$MSR_TIME_POSIXct <- as.POSIXct(paste(hr_60$MSR_DT, hr_60$MSR_TIME))
+```
+
+```{r}
+
+```
+
+
+```{r}
+library(dplyr)
+
+na_summary <- hr_60 %>%
+  summarise(
+    NA_count_MSR_DT = sum(is.na(MSR_DT)),
+    NA_count_MSR_TIME = sum(is.na(MSR_TIME))
+
+  )
+
+print(na_summary)
+```
+
