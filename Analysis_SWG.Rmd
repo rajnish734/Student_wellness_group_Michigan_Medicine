@@ -64,26 +64,7 @@ library(data.table)
 library(moments) 
 
 # REMOVE THE FOLLOWING FROM GITHUB
-all_participants_SWG_stats <- df_SWG_all[
-  HR_msrd_Y_N == 1 & ACTIVITY_TYPE_VAL != 0,
-  .(
-    # HR statistics
-    hr_mean = mean(HR_MSRMNT_VAL, na.rm = TRUE),
-    hr_sd = sd(HR_MSRMNT_VAL, na.rm = TRUE),
-    hr_skewness = skewness(HR_MSRMNT_VAL, na.rm = TRUE),
-    hr_kurtosis = kurtosis(HR_MSRMNT_VAL, na.rm = TRUE),
-    
-    # Steps statistics
-    steps_sum = sum(STEPS_MSRMNT_VAL, na.rm = TRUE),
-    steps_mean = mean(STEPS_MSRMNT_VAL, na.rm = TRUE),
-    steps_sd = sd(STEPS_MSRMNT_VAL, na.rm = TRUE),
-    steps_skewness = skewness(STEPS_MSRMNT_VAL, na.rm = TRUE),
-    steps_kurtosis = kurtosis(STEPS_MSRMNT_VAL, na.rm = TRUE),
-    
-    n_observations = .N
-  ),
-  by = .(prtcpt_id, day, ACTIVITY_TYPE_VAL)
-]
+
 # REMOVE UP TO HERE FROM GITHUB
 
 ```
