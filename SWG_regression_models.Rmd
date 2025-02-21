@@ -1,0 +1,677 @@
+---
+title: "SWG_regression_models"
+author: "Rajnish Kumar"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Do the following regression models as starting point. These are all for the prediction of daily MOOD score. 
+  Demographics only, 
+
+Demographics plus the following: 
+1. resting heart rate 
+2. mean, 
+3. standard deviation == mode 4 
+4. demographic plus mean
+5. demographics plus standard deviations. 
+
+6. MOOD 
+
+amount of time in mode 5, 6, and 7. 
+
+steps counts in 5, 6, and 7. 
+
+percentage of minutes out of 24 hours. 
+
+```{r}
+# Data Reading & Manipulation
+library(tidyr)
+library(dplyr)
+library(data.table)
+library(lubridate)
+library(tidyverse)
+library(dplyr)
+
+# Data Visualization
+library(viridis)  # For better color palettes
+library(hrbrthemes)  # For theme_ipsum()
+library(plotly)  # For interactive plots
+library(gtsummary)
+```
+
+
+Calculate summary statistics for heart rates and steps for the student wellness group. 
+
+```{r }
+df_SWG_all <- readRDS("df_COMB_SWG_all_20250110_1248.rds")
+roadmap_IDs <- read.csv("C:\\Users\\rajnishk\\OneDrive - Michigan Medicine\\Documents\\Analysis_projects_R_laptop\\SWG_R_project\\SWG_data\\StudentWellness_RoadmapID.csv")
+dev_IDs <- read.csv("C:\\Users\\rajnishk\\OneDrive - Michigan Medicine\\Documents\\Analysis_projects_R_laptop\\SWG_R_project\\SWG_data\\Device_ID.csv")
+
+```
+
+
+
+```{r}
+roadmap_IDs$onboard_date <- as.Date(roadmap_IDs$onboard_date, format="%m/%d/%y")
+
+length_of_study <- 119                                                     # Make it 89 or 119 based on the feedbacks. 
+roadmap_IDs$day_0 <- as.Date(roadmap_IDs$onboard_date, format="%m/%d/%y")
+roadmap_IDs$day_last <- roadmap_IDs$day_0 + length_of_study
+
+```
+
+Import MOOD data set and demography, then do the regression models on MOOD and demography. 
+
+Make sure to filter the mood according to the study period and filter out the data outside the study period. 
+
+```{r}
+df_MOOD_time <- read.csv("C:\\Users\\rajnishk\\OneDrive - Michigan Medicine\\Documents\\Analysis_projects_R_laptop\\SWG_R_project\\SWG_data\\SWG_mood_time_entry.csv")
+
+df_MOOD_time <- df_MOOD_time[df_MOOD_time$INT_SRVY_RSPNS!="SELECTED",]
+```
+
+
+
+
+```{r}
+library(dplyr)
+library(lubridate)
+
+library(dplyr)
+library(lubridate)
+
+df_MOOD <- df_MOOD_time %>%
+  mutate(
+    MOOD_report_date = as.Date(gsub("^(\\d{4}-\\d{2}-\\d{2}).*$", "\\1", INT_SRVY_RSPNS_DT))
+  ) %>%
+  select(
+    MOOD_report_date,
+    INT_SRVY_RSPNS,
+    STUDY_PRTCPT_ID
+  )
+
+df_MOOD<- df_MOOD%>%mutate(INT_SRVY_RSPNS = as.numeric(INT_SRVY_RSPNS))
+```
+
+Filter out the date range for MOOD score. 
+
+```{r}
+library(dplyr)
+
+df_MOOD_120 <- df_MOOD %>%
+  left_join(roadmap_IDs, by = c("STUDY_PRTCPT_ID" = "rm_access_code")) %>%
+   filter(MOOD_report_date >= day_0 & MOOD_report_date <= day_last) %>%
+  select(MOOD_report_date, INT_SRVY_RSPNS, STUDY_PRTCPT_ID)
+
+```
+
+
+
+```{r}
+library(readxl)
+SWG_demo <- read_excel("C:\\Users\\rajnishk\\OneDrive - Michigan Medicine\\Documents\\Analysis_projects_R_laptop\\SWG_R_project\\SWG_data\\Student Wellness Demographics.xlsx")
+```
+
+
+
+```{r}
+filtered_SWG_demo <- SWG_demo %>%
+  filter(`Study ID` %in% c("Age", "Female" , "Male" ))
+```
+
+
+
+```{r}
+filtered_SWG_demo_no_identity <- filtered_SWG_demo %>%
+  select(-Identity)
+```
+
+
+
+```{r}
+library(tidyr)
+transposed_demo <- as.data.frame(t(filtered_SWG_demo_no_identity))
+names(transposed_demo) <- transposed_demo[1,]
+transposed_demo <- transposed_demo[-1,]
+```
+
+Removing the row with "Total" value 
+```{r}
+transposed_demo <- transposed_demo[-nrow(transposed_demo), ]
+```
+
+
+```{r}
+demographic_SWG_final <- transposed_demo
+demographic_SWG_final <- demographic_SWG_final%>% mutate(Age = as.numeric(Age))
+
+demographic_SWG_final <- demographic_SWG_final %>%
+  mutate(
+    Sex = case_when(
+      Male == "x" ~ "male",
+      Female == "x" ~ "female",
+      TRUE ~ NA_character_
+    )
+  )
+
+
+```
+Match it with the roadmap IDs and start and end date of the study. 
+
+```{r}
+library(dplyr)
+roadmap_IDs_with_demographics <- roadmap_IDs %>%
+  left_join(demographic_SWG_final %>% 
+              mutate(study_id = rownames(demographic_SWG_final)), 
+            by = "study_id")
+```
+
+
+```{r}
+# write.csv(roadmap_IDs_with_demographics, file = "roadmap_IDs_with_demographics.csv", row.names = FALSE)
+```
+
+
+
+Filter the mood data frame with the range of study dates present in roadmap_IDs_with_demographics along with add demographic information to be able to implement some regression models. 
+
+
+```{r}
+library(dplyr)
+
+df_MOOD_120_with_demographics <- df_MOOD_120 %>%
+  left_join(
+    roadmap_IDs_with_demographics %>% 
+    select(rm_access_code, Age, Sex),
+    by = c("STUDY_PRTCPT_ID" = "rm_access_code")
+  )
+```
+
+
+```{r}
+# library(dplyr)
+# 
+# df_MOOD_120_with_demographics <- df_MOOD_120_with_demographics %>%
+#   mutate(
+#     Sex = case_when(
+#       Male == "x" ~ "male",
+#       Female == "x" ~ "female",
+#       TRUE ~ NA_character_
+#     )
+#   )
+```
+
+
+Let us do several regression models with demographics only. 
+
+```{r}
+# df_MOOD_120_with_demographics$Sex <- as.factor(df_MOOD_120_with_demographics$Sex)
+
+```
+
+The data frame going into regression model will be called df_regression and will be derived right before the model statement to keep the code smooth.
+
+```{r}
+df_regression <- df_MOOD_120_with_demographics[!is.na(df_MOOD_120_with_demographics$Age), ] # There are no missing values in Age. 
+
+library(lmerTest)
+library(performance)
+model1 <- lmer(INT_SRVY_RSPNS ~ Age + (1 | STUDY_PRTCPT_ID), data = df_regression)
+
+
+```
+
+
+
+```{r}
+df_regression <- df_MOOD_120_with_demographics[!is.na(df_MOOD_120_with_demographics$Age), ]
+# df_regression[df_regression$Age>25,]$Age <- 25
+df_regression[df_regression$Age>25,]$Age <- 25
+model1a <- lmer(INT_SRVY_RSPNS ~ Age + Sex + (1 | STUDY_PRTCPT_ID), data = df_regression)
+
+```
+
+
+
+```{r}
+
+df_regression <- df_MOOD_120_with_demographics[!is.na(df_MOOD_120_with_demographics$Sex), ]
+model2 <- lmer(INT_SRVY_RSPNS ~ Sex + (1 | STUDY_PRTCPT_ID), data = df_regression)
+```
+
+
+
+```{r}
+# df_regression same as before
+
+model3 <- lmer(INT_SRVY_RSPNS ~ Age + Sex + (1 | STUDY_PRTCPT_ID), data = df_regression)
+
+```
+
+
+```{r}
+# df_regression same as before
+model4 <- lmer(INT_SRVY_RSPNS ~ Age * Sex + (1 | STUDY_PRTCPT_ID), data = df_regression)
+
+
+```
+
+
+```{r}
+model5 <- lmer(INT_SRVY_RSPNS ~ Age + Sex + (Age | STUDY_PRTCPT_ID), data = df_regression)
+
+```
+```{r}
+model6 <- lmer(INT_SRVY_RSPNS ~ Age * Sex + (Age + Age:Sex | STUDY_PRTCPT_ID), data = df_regression)
+
+``` 
+Get the physiological data and include it here. 
+
+
+
+```{r}
+library(data.table)
+library(moments) 
+
+setDT(df_SWG_all)  
+
+all_participants_SWG_stats <- df_SWG_all[
+  HR_msrd_Y_N == 1 & ACTIVITY_TYPE_VAL != 0,
+  .(
+    # HR statistics
+    hr_mean = mean(HR_MSRMNT_VAL, na.rm = TRUE),
+    hr_sd = sd(HR_MSRMNT_VAL, na.rm = TRUE),
+    hr_skewness = skewness(HR_MSRMNT_VAL, na.rm = TRUE),
+    hr_kurtosis = kurtosis(HR_MSRMNT_VAL, na.rm = TRUE),
+    
+    # Steps statistics
+    steps_sum = sum(STEPS_MSRMNT_VAL, na.rm = TRUE),
+    steps_mean = mean(STEPS_MSRMNT_VAL, na.rm = TRUE),
+    steps_sd = sd(STEPS_MSRMNT_VAL, na.rm = TRUE),
+    steps_skewness = skewness(STEPS_MSRMNT_VAL, na.rm = TRUE),
+    steps_kurtosis = kurtosis(STEPS_MSRMNT_VAL, na.rm = TRUE),
+    
+    n_observations = .N
+  ),
+  by = .(prtcpt_id, day, ACTIVITY_TYPE_VAL)
+]
+```
+
+
+Removing type 4 where there is steps count
+
+```{r}
+all_participants_SWG_stats_type_4_filtered <- all_participants_SWG_stats %>% 
+  filter(!(ACTIVITY_TYPE_VAL == 4 & steps_sum != 0))
+```
+
+Get the data frame for participant - day with all the stats. 
+
+
+```{r}
+HR_STEPS_filtered_stats_SWG_all_ptcpt <- all_participants_SWG_stats_type_4_filtered %>%
+  pivot_wider(
+    id_cols = c(prtcpt_id, day),
+    names_from = ACTIVITY_TYPE_VAL,
+    names_glue = "{.value}_type_{ACTIVITY_TYPE_VAL}",
+    values_from = c(hr_mean, hr_sd, hr_skewness, hr_kurtosis, 
+                   steps_sum, steps_mean, steps_sd, 
+                   steps_skewness, steps_kurtosis, n_observations)
+  )
+```
+
+Add the information about date for each of the participant-day combination.Tehn you can add demographic information and do regression models again.
+
+```{r}
+# Map the date for participant-day
+date_mapping <- df_SWG_all[, .(date = as.Date(msmt_instant)[1]), by = .(prtcpt_id, day)]
+```
+
+Combine the dates with the stats of physiological data HR_STEPS_filtered_stats_SWG_all_ptcpt
+
+```{r}
+HR_STEPS_filtered_stats_SWG_all_ptcpt <- HR_STEPS_filtered_stats_SWG_all_ptcpt %>%
+  left_join(date_mapping, by = c("prtcpt_id", "day"))
+```
+
+Combine HR_STEPS_filtered_stats_SWG_all_ptcpt with demography and MOOD, so that you can do regression with demography, physiological data and MOOD. 
+
+
+```{r}
+library(dplyr)
+
+df_HR_STEPS_stats_demo_MOOD_120 <- HR_STEPS_filtered_stats_SWG_all_ptcpt %>% 
+  left_join(df_MOOD_120_with_demographics %>% 
+      select(STUDY_PRTCPT_ID, MOOD_report_date, INT_SRVY_RSPNS),
+    by = c(
+      "prtcpt_id" = "STUDY_PRTCPT_ID",
+      "date" = "MOOD_report_date"
+    )
+  )
+
+# This data set df_HR_STEPS_stats_demo_MOOD_120 represents days for which we have both physiological signals as well as self reported MOOD. There are a few days, where fitbit data is not present but MOOD score is present. 
+
+# Add the demographic values to it 
+
+library(dplyr)
+
+# First, get unique participant-demographic pairs
+participant_demographics <- roadmap_IDs_with_demographics %>%
+  select(rm_access_code , Age, Sex) %>%
+  distinct()
+
+# Now join this with your main dataframe
+df_HR_STEPS_stats_demo_MOOD_120 <- df_HR_STEPS_stats_demo_MOOD_120 %>%
+  left_join(
+    participant_demographics,
+    by = c("prtcpt_id" = "rm_access_code")
+  )
+```
+
+
+
+Add total number of minutes of observations for each participant day. It might introduce NAs to some rows for total_wear_time, because one of the types of activities might be NA value for that person-day. 
+
+
+
+```{r}
+df_HR_STEPS_stats_demo_MOOD_120 <- df_HR_STEPS_stats_demo_MOOD_120%>%
+                     mutate(total_wear_time = n_observations_type_5+ n_observations_type_6+ n_observations_type_4+ n_observations_type_7 )
+
+```
+
+
+
+
+We can try several regression models now. Make sure to create a df_regression data frame that keeps information about the data set used in immediate model. 
+
+```{r}
+library(lmerTest)
+library(performance)
+
+df_regression <- df_HR_STEPS_stats_demo_MOOD_120 %>% 
+                         select(prtcpt_id, date, hr_mean_type_4, hr_sd_type_4, Age, Sex, INT_SRVY_RSPNS  )
+
+df_regression <- df_regression %>%
+  mutate(
+    hr_mean_type_4 = scale(hr_mean_type_4),
+    hr_sd_type_4 = scale(hr_sd_type_4)
+
+  )
+
+# Basic model with all predictors
+model7 <- lmer(INT_SRVY_RSPNS ~ hr_mean_type_4 + hr_sd_type_4 + Age + Sex + (1 | prtcpt_id), data = df_regression, na.action = na.omit)
+
+
+```
+
+
+```{r}
+# Basic model with all predictors
+
+df_regression <- df_HR_STEPS_stats_demo_MOOD_120 %>% 
+                         select(prtcpt_id, date, hr_mean_type_4, hr_sd_type_4,  Sex, INT_SRVY_RSPNS  )
+
+df_regression <- df_regression %>%
+  mutate(
+    hr_mean_type_4 = scale(hr_mean_type_4),
+    hr_sd_type_4 = scale(hr_sd_type_4)
+
+  )
+
+model8 <- lmer(INT_SRVY_RSPNS ~ hr_mean_type_4 + hr_sd_type_4  + Sex + (1 | prtcpt_id), data = df_regression, na.action = na.omit)
+
+```
+
+
+```{r}
+# attach(mtcars)
+plot(df_regression$hr_mean_type_4, df_regression$hr_sd_type_4, main="Scatterplot Example",
+   xlab="mean", ylab="sd ", pch=19)
+```
+
+
+
+```{r}
+df_regression <- df_HR_STEPS_stats_demo_MOOD_120 %>% 
+                         select(prtcpt_id, date, hr_mean_type_4, hr_sd_type_4,  INT_SRVY_RSPNS  )
+
+df_regression <- df_regression %>%
+  mutate(
+    hr_mean_type_4 = scale(hr_mean_type_4),
+    hr_sd_type_4 = scale(hr_sd_type_4)
+
+  )
+model9 <- lmer(INT_SRVY_RSPNS ~ hr_mean_type_4 + hr_sd_type_4  + (1 | prtcpt_id), data = df_regression, na.action = na.omit)
+```
+
+
+
+```{r}
+df_regression <- df_HR_STEPS_stats_demo_MOOD_120 %>% 
+                         select(prtcpt_id, date, hr_mean_type_4, hr_sd_type_4, steps_sum_type_7,n_observations_type_7, INT_SRVY_RSPNS  )
+
+df_regression <- df_regression %>%
+  mutate(
+    hr_mean_type_4 = scale(hr_mean_type_4),
+    hr_sd_type_4 = scale(hr_sd_type_4),
+    steps_sum_type_7 = scale(steps_sum_type_7),
+    n_observations_type_7 = scale(n_observations_type_7)
+  )
+model10 <- lmer(INT_SRVY_RSPNS ~ hr_mean_type_4 + hr_sd_type_4  + steps_sum_type_7 + n_observations_type_7 + (1 | prtcpt_id), data = df_regression, na.action = na.omit)
+```
+
+
+
+```{r}
+df_regression <- df_HR_STEPS_stats_demo_MOOD_120 %>% 
+                         select(prtcpt_id, date, hr_mean_type_4, Age, Sex, hr_sd_type_4, steps_sum_type_7,n_observations_type_7, INT_SRVY_RSPNS  )
+
+df_regression <- df_regression %>%
+  mutate(
+    hr_mean_type_4 = scale(hr_mean_type_4),
+    hr_sd_type_4 = scale(hr_sd_type_4),
+    steps_sum_type_7 = scale(steps_sum_type_7),
+    n_observations_type_7 = scale(n_observations_type_7)
+  )
+model10 <- lmer(INT_SRVY_RSPNS ~ Age + Sex +  n_observations_type_7 + (1 | prtcpt_id), data = df_regression, na.action = na.omit)
+```
+
+
+
+```{r}
+# attach(mtcars)
+plot(df_regression$n_observations_type_7, df_regression$hr_sd_type_4, main="Scatterplot Example",
+   xlab=" obs time of type 7", ylab=" sedentary HR STD ", pch=19)
+```
+
+
+
+```{r}
+df_regression <- df_HR_STEPS_stats_demo_MOOD_120 %>% 
+                         select(prtcpt_id, date, hr_mean_type_4, hr_sd_type_4, Sex, Age, steps_sum_type_7,n_observations_type_7, INT_SRVY_RSPNS  )
+
+df_regression <- df_regression %>%
+  mutate(
+    hr_mean_type_4 = scale(hr_mean_type_4),
+    hr_sd_type_4 = scale(hr_sd_type_4),
+    steps_sum_type_7 = scale(steps_sum_type_7),
+    n_observations_type_7 = scale(n_observations_type_7)
+  )
+model11 <- lmer(INT_SRVY_RSPNS ~ hr_mean_type_4 + hr_sd_type_4  + steps_sum_type_7 + Age+ Sex+ n_observations_type_7 + (1 | prtcpt_id), data = df_regression, na.action = na.omit)
+```
+
+
+
+```{r}
+df_regression <- df_HR_STEPS_stats_demo_MOOD_120 %>% 
+                         select(prtcpt_id, date, hr_mean_type_4, hr_sd_type_4, Sex, Age, steps_sum_type_7,n_observations_type_7,total_wear_time, INT_SRVY_RSPNS  )
+
+df_regression <- df_regression %>%
+  mutate(
+    hr_mean_type_4 = scale(hr_mean_type_4),
+    hr_sd_type_4 = scale(hr_sd_type_4),
+    steps_sum_type_7 = scale(steps_sum_type_7),
+    n_observations_type_7 = scale(n_observations_type_7),
+    total_wear_time     = scale(total_wear_time)    
+  )
+model12 <- lmer(INT_SRVY_RSPNS ~ hr_mean_type_4 + hr_sd_type_4  + steps_sum_type_7 + Age+ Sex+ total_wear_time + n_observations_type_7 + (1 | prtcpt_id), data = df_regression, na.action = na.omit)
+```
+
+
+
+```{r}
+df_regression <- df_HR_STEPS_stats_demo_MOOD_120 %>% 
+                         select(prtcpt_id, date,  hr_sd_type_4, Sex, Age, steps_sum_type_7,n_observations_type_7,total_wear_time, INT_SRVY_RSPNS  )
+
+df_regression <- df_regression %>%
+  mutate(
+   
+    hr_sd_type_4 = scale(hr_sd_type_4),
+    steps_sum_type_7 = scale(steps_sum_type_7),
+    n_observations_type_7 = scale(n_observations_type_7),
+    total_wear_time     = scale(total_wear_time)    
+  )
+model13 <- lmer(INT_SRVY_RSPNS ~  hr_sd_type_4  + steps_sum_type_7 + Age+ Sex+ total_wear_time + n_observations_type_7 + (1 | prtcpt_id), data = df_regression, na.action = na.omit)
+```
+
+
+
+```{r}
+df_regression <- df_HR_STEPS_stats_demo_MOOD_120 %>% 
+                         select(prtcpt_id, date, hr_mean_type_4, hr_sd_type_4, Sex, Age, steps_sum_type_7,steps_sd_type_7, n_observations_type_7,total_wear_time, INT_SRVY_RSPNS  )
+
+df_regression <- df_regression %>%
+  mutate(
+    hr_mean_type_4 = scale(hr_mean_type_4),
+    hr_sd_type_4 = scale(hr_sd_type_4),
+    steps_sum_type_7 = scale(steps_sum_type_7),
+    n_observations_type_7 = scale(n_observations_type_7),
+    steps_sd_type_7 = scale(steps_sd_type_7),
+    total_wear_time     = scale(total_wear_time)    
+  )
+model14 <- lmer(INT_SRVY_RSPNS ~ hr_mean_type_4 + hr_sd_type_4  + steps_sum_type_7 + steps_sd_type_7+ Age+ Sex+ total_wear_time + n_observations_type_7 + (1 | prtcpt_id), data = df_regression, na.action = na.omit)
+```
+
+
+```{r}
+df_regression <- df_HR_STEPS_stats_demo_MOOD_120 %>% 
+                         select(prtcpt_id, date, Sex, Age, steps_sum_type_7,steps_sd_type_7, n_observations_type_7,total_wear_time, INT_SRVY_RSPNS  )
+
+df_regression <- df_regression %>%
+  mutate(
+    steps_sum_type_7 = scale(steps_sum_type_7),
+    n_observations_type_7 = scale(n_observations_type_7),
+    steps_sd_type_7 = scale(steps_sd_type_7),
+    total_wear_time     = scale(total_wear_time)    
+  )
+model15 <- lmer(INT_SRVY_RSPNS ~ steps_sum_type_7 + steps_sd_type_7+ Age+ Sex+ total_wear_time + n_observations_type_7 + (1 | prtcpt_id), data = df_regression, na.action = na.omit)
+```
+
+
+```{r}
+df_regression <- df_HR_STEPS_stats_demo_MOOD_120 %>% 
+                         select(prtcpt_id, date, hr_mean_type_4, hr_sd_type_4, Sex, Age, steps_sum_type_6, steps_sum_type_7, n_observations_type_6, n_observations_type_7,total_wear_time, INT_SRVY_RSPNS  )
+
+df_regression <- df_regression %>%
+  mutate(
+    hr_mean_type_4 = scale(hr_mean_type_4),
+    hr_sd_type_4 = scale(hr_sd_type_4),
+    steps_sum_type_7 = scale(steps_sum_type_7),
+    n_observations_type_7 = scale(n_observations_type_7),
+    steps_sum_type_6 = scale(steps_sum_type_6),
+    total_wear_time     = scale(total_wear_time)    
+  )
+model16 <- lmer(INT_SRVY_RSPNS ~ hr_mean_type_4 + hr_sd_type_4  + steps_sum_type_7 + steps_sum_type_6 + Age+ Sex+ total_wear_time + n_observations_type_7 + n_observations_type_6 + (1 | prtcpt_id), data = df_regression, na.action = na.omit)
+```
+
+
+```{r}
+df_regression <- df_HR_STEPS_stats_demo_MOOD_120 %>% 
+                         select(prtcpt_id, date, hr_mean_type_4, hr_sd_type_4, Sex, Age, steps_sum_type_6, steps_sum_type_7, n_observations_type_6, n_observations_type_7, INT_SRVY_RSPNS  )
+
+df_regression <- df_regression %>%
+  mutate(
+    hr_mean_type_4 = scale(hr_mean_type_4),
+    hr_sd_type_4 = scale(hr_sd_type_4),
+    steps_sum_type_7 = scale(steps_sum_type_7),
+    n_observations_type_7 = scale(n_observations_type_7),
+    steps_sum_type_6 = scale(steps_sum_type_6)
+      
+  )
+model17 <- lmer(INT_SRVY_RSPNS ~ hr_mean_type_4 + hr_sd_type_4  + steps_sum_type_7 + steps_sum_type_6 + Age+ Sex+  n_observations_type_7 + n_observations_type_6 + (1 | prtcpt_id), data = df_regression, na.action = na.omit)
+```
+
+
+```{r}
+model18 <- lmer(INT_SRVY_RSPNS ~ hr_mean_type_4 + hr_sd_type_4  + steps_sum_type_7 + steps_sum_type_6 + Age* Sex+  n_observations_type_7 + n_observations_type_6 + (1 | prtcpt_id), data = df_regression, na.action = na.omit)
+```
+
+
+
+```{r}
+
+df_regression <- df_HR_STEPS_stats_demo_MOOD_120 %>% 
+                         select(prtcpt_id, date, hr_mean_type_4, hr_sd_type_4, Sex, Age, steps_sum_type_6, steps_sum_type_7,   INT_SRVY_RSPNS  )
+
+df_regression <- df_regression %>%
+  mutate(
+    hr_mean_type_4 = scale(hr_mean_type_4),
+    hr_sd_type_4 = scale(hr_sd_type_4),
+    steps_sum_type_7 = scale(steps_sum_type_7),
+    steps_sum_type_6 = scale(steps_sum_type_6)
+      
+  )
+
+
+model19 <- lmer(INT_SRVY_RSPNS ~ hr_mean_type_4 + hr_sd_type_4  + steps_sum_type_7 + steps_sum_type_6 + Age* Sex + (hr_sd_type_4 | prtcpt_id), data = df_regression, na.action = na.omit)
+```
+
+
+```{r}
+df_regression <- df_HR_STEPS_stats_demo_MOOD_120 %>% 
+                         select(prtcpt_id, date, hr_mean_type_4, hr_sd_type_4, Sex, Age, steps_sum_type_6, steps_sum_type_5,steps_sum_type_7,   INT_SRVY_RSPNS  )
+
+df_regression <- df_regression %>%
+  mutate(
+    hr_mean_type_4 = scale(hr_mean_type_4),
+    hr_sd_type_4 = scale(hr_sd_type_4),
+    steps_sum_type_5 = scale(steps_sum_type_5),
+    steps_sum_type_7 = scale(steps_sum_type_7),
+    steps_sum_type_6 = scale(steps_sum_type_6)
+      
+  )
+
+
+model20 <- lmer(INT_SRVY_RSPNS ~ hr_mean_type_4 + hr_sd_type_4  + steps_sum_type_7 + steps_sum_type_5 + steps_sum_type_6 + Age* Sex + (hr_sd_type_4 | prtcpt_id), data = df_regression, na.action = na.omit)
+```
+
+
+```{r}
+model21 <- lmer(INT_SRVY_RSPNS ~ hr_mean_type_4 + hr_sd_type_4  + steps_sum_type_7 + steps_sum_type_5 + hr_sd_type_4*steps_sum_type_6 + Age* Sex + (1 | prtcpt_id), data = df_regression, na.action = na.omit)
+```
+
+
+Following is just for the sanity check. All these pairs should represent same participants and their sex. 
+```{r}
+df_MOOD_demo_pair <- df_MOOD_120_with_demographics%>%select(STUDY_PRTCPT_ID,Sex)%>%distinct()
+
+roadmap_demo_pair <- roadmap_IDs_with_demographics%>% select(rm_access_code,Sex)%>% distinct()
+
+HR_STEPS_stats_demo_pair <- df_HR_STEPS_stats_demo_MOOD_120 %>% select(prtcpt_id,Sex)%>% distinct()
+
+
+print("entire code ran successfully")
+
+```
+
+
+
+```{r}
+
+```
+
