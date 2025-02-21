@@ -1,0 +1,958 @@
+---
+title: "SWG_regression_models1"
+author: "Rajnish Kumar"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+You should come back to SQL and match the data from minute level and do all the calculations, instead of just picking measurements at the points where seconds == "00". That will be more inclusive for the participants who do have measurements coming at non zero values of seconds. You can also check that how many of them do have measurements that is coming at seconds values that are not equal to zero. (I think in BMT, it's like 10 people or something, and the date was before some time in 2020). 
+
+
+Cap the age, clean the previous hick ups, in the data set, make sure to exclude the stuff that shouldn't be present, e.g. number of steps taken during type 4 is not equal to zero. Also exclude number of steps greater than 200 (this is the upper limit assumed by you, and you still need to get feedback from the team on it). 
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+-- Add demographics and sex in all the regression models:
+
+Also do the following: 
+Capping the age of the participants
+Proportions of each types of steps (primary priority), and include total number of steps.                
+Add total amount of sleep – primary. 
+Proportions of types of sleep – secondary priority
+
+
+```{r}
+
+library(tidyr)
+library(dplyr)
+library(data.table)
+library(lubridate)
+library(tidyverse)
+library(dplyr)
+library(viridis)  # For better color palettes
+library(hrbrthemes)  # For theme_ipsum()
+library(plotly)  # For interactive plots
+library(gtsummary)
+
+
+```
+
+
+
+```{r}
+df_SWG_all <- readRDS("df_COMB_SWG_all_20250110_1248.rds")
+roadmap_IDs <- read.csv("C:\\Users\\rajnishk\\OneDrive - Michigan Medicine\\Documents\\Analysis_projects_R_laptop\\SWG_R_project\\SWG_data\\StudentWellness_RoadmapID.csv")
+dev_IDs <- read.csv("C:\\Users\\rajnishk\\OneDrive - Michigan Medicine\\Documents\\Analysis_projects_R_laptop\\SWG_R_project\\SWG_data\\Device_ID.csv")
+
+df_sleep_details<- read.csv("C:\\Users\\rajnishk\\OneDrive - Michigan Medicine\\Documents\\Analysis_projects_R_laptop\\SWG_R_project\\SWG_data\\student_wellness_sleep_details.csv")
+```
+
+
+```{r}
+roadmap_IDs$onboard_date <- as.Date(roadmap_IDs$onboard_date, format="%m/%d/%y")
+
+length_of_study <- 119                                                     # Make it 89 or 119 based on the feedbacks from the group.  
+roadmap_IDs$day_0 <- as.Date(roadmap_IDs$onboard_date, format="%m/%d/%y")
+roadmap_IDs$day_last <- roadmap_IDs$day_0 + length_of_study
+```
+
+
+
+```{r}
+df_MOOD_time <- read.csv("C:\\Users\\rajnishk\\OneDrive - Michigan Medicine\\Documents\\Analysis_projects_R_laptop\\SWG_R_project\\SWG_data\\SWG_mood_time_entry.csv")
+
+df_MOOD_time <- df_MOOD_time[df_MOOD_time$INT_SRVY_RSPNS!="SELECTED",]
+
+```
+
+
+
+```{r}
+library(dplyr)
+library(lubridate)
+
+library(dplyr)
+library(lubridate)
+
+df_MOOD <- df_MOOD_time %>%
+  mutate(
+    MOOD_report_date = as.Date(gsub("^(\\d{4}-\\d{2}-\\d{2}).*$", "\\1", INT_SRVY_RSPNS_DT))
+  ) %>%
+  select(
+    MOOD_report_date,
+    INT_SRVY_RSPNS,
+    STUDY_PRTCPT_ID
+  )
+
+df_MOOD<- df_MOOD%>%mutate(INT_SRVY_RSPNS = as.numeric(INT_SRVY_RSPNS))
+```
+
+
+
+```{r}
+
+library(dplyr)
+
+df_MOOD_120 <- df_MOOD %>%
+  left_join(roadmap_IDs, by = c("STUDY_PRTCPT_ID" = "rm_access_code")) %>%
+   filter(MOOD_report_date >= day_0 & MOOD_report_date <= day_last) %>%
+  select(MOOD_report_date, INT_SRVY_RSPNS, STUDY_PRTCPT_ID)
+
+```
+
+
+
+```{r}
+library(readxl)
+# SWG_demo <- read_excel("C:\\Users\\rajnishk\\OneDrive - Michigan Medicine\\Documents\\Analysis_projects_R_laptop\\SWG_R_project\\SWG_data\\Student Wellness Demographics.xlsx")
+roadmap_IDs_with_demographics <- read.csv("roadmap_IDs_with_demographics.csv") # There are more demographic data including international status etc. I have kept it to age and sex of the participants for now. 
+
+```
+
+
+Find distribution of Age
+```{r}
+
+# hist(roadmap_IDs_with_demographics$Age, breaks = seq(min(roadmap_IDs_with_demographics$Age, na.rm = TRUE),
+#                                                      max(roadmap_IDs_with_demographics$Age, na.rm = TRUE),
+#                                                      by = 1), main = "Distribution Age SWG", xlab = "Age", col = "lightblue",border = "black")
+
+```
+
+Cap the age and do the regression models just with the demographics. Then we can include sleep and other steps related details. 
+
+```{r}
+roadmap_IDs_with_demographics$Age_capped_25 <- ifelse(roadmap_IDs_with_demographics$Age > 25, 25, roadmap_IDs_with_demographics$Age)
+
+```
+
+
+
+```{r}
+library(dplyr)
+
+df_MOOD_120_with_demographics <- df_MOOD_120 %>%
+  left_join(
+    roadmap_IDs_with_demographics %>% 
+    select(rm_access_code, Age, Sex, Age_capped_25),
+    by = c("STUDY_PRTCPT_ID" = "rm_access_code")
+  )
+```
+
+
+
+```{r}
+
+efgh <- df_MOOD_120_with_demographics %>% 
+  group_by(Age, Sex, Age_capped_25, STUDY_PRTCPT_ID) %>% slice(1)
+
+```
+
+Do regression models with just the demography, then you can include all the physiological signals. Make sure to plot ICC etc. 
+
+```{r}
+library(lmerTest)
+df_current_regression <- df_MOOD_120_with_demographics[!is.na(df_MOOD_120_with_demographics$Age_capped_25), ] # There are no missing values in Age. 
+
+
+model1 <- lmer(INT_SRVY_RSPNS ~ Age_capped_25 + (1 | STUDY_PRTCPT_ID), data = df_current_regression)
+
+# summary(model1)
+```
+
+
+
+```{r}
+library(lmerTest)
+library(performance)
+
+df_current_regression <- df_MOOD_120_with_demographics[!is.na(df_MOOD_120_with_demographics$Age_capped_25), ] # There are no missing values in Age. 
+
+model1 <- lmer(INT_SRVY_RSPNS ~ Age_capped_25 + (1 | STUDY_PRTCPT_ID), data = df_current_regression)
+# icc(model1)
+# summary(model1)
+```
+
+
+
+```{r}
+
+df_current_regression$predicted <- predict(model1)
+plot(df_current_regression$INT_SRVY_RSPNS, df_current_regression$predicted,
+     xlab = "Actual", ylab = "Predicted", main = "Actual vs Predicted",
+     col = "blue", pch = 16)
+abline(0, 1, col = "red", lwd = 2)
+
+```
+
+
+```{r}
+library(lmerTest)
+library(performance)
+
+df_current_regression <- df_MOOD_120_with_demographics[!is.na(df_MOOD_120_with_demographics$Sex), ] # There are no missing values in Age. 
+
+model1 <- lmer(INT_SRVY_RSPNS ~ Age_capped_25 + Sex + (1 | STUDY_PRTCPT_ID), data = df_current_regression)
+# icc(model1)
+# summary(model1)
+
+```
+
+
+```{r}
+model1 <- lmer(INT_SRVY_RSPNS ~ Age_capped_25 * Sex + (1 | STUDY_PRTCPT_ID), data = df_current_regression)
+# icc(model1)
+# summary(model1)
+```
+
+
+```{r}
+model1 <- lmer(INT_SRVY_RSPNS ~ Age_capped_25 + Sex + (Age_capped_25 | STUDY_PRTCPT_ID), data = df_current_regression)
+# icc(model1)
+# summary(model1)
+```
+
+
+```{r}
+model1 <- lmer(INT_SRVY_RSPNS ~ Age_capped_25 * Sex + (Age_capped_25 + Age_capped_25:Sex | STUDY_PRTCPT_ID), data = df_current_regression)
+# icc(model1)
+# summary(model1)
+```
+Include the heart rate and steps statistics with the parameters related to steps counts. Here are the things that need to be included so far: 
+
+Proportions of each types of steps (primary priority), and include total number of steps. 
+Add total amount of sleep – primary. 
+Proportions of types of sleep – secondary priority
+
+
+```{r}
+abcd <- df_SWG_all[df_SWG_all$HR_msrd_Y_N==1 & df_SWG_all$Activity_4_Y_N ==1, ]
+
+abcd_2 <- df_SWG_all[df_SWG_all$HR_msrd_Y_N==1 & df_SWG_all$Activity_4_Y_N == 1 & df_SWG_all$STEPS_MSRMNT_VAL > 0, ]
+
+abcd_1 <- df_SWG_all[df_SWG_all$HR_msrd_Y_N==1 & df_SWG_all$ACTIVITY_TYPE_VAL == 4 & df_SWG_all$STEPS_MSRMNT_VAL > 0, ] # THis is the one with noisy data where people have measurements of number of steps even when the person is sedentary. 
+
+abcd_3 <- df_SWG_all[df_SWG_all$HR_msrd_Y_N==1  & df_SWG_all$STEPS_MSRMNT_VAL > 0, ]
+
+abcd_4 <- df_SWG_all[df_SWG_all$HR_msrd_Y_N==1  & df_SWG_all$STEPS_MSRMNT_VAL>200 ,]
+steps_upper_limit = 200
+abcd_4 <- df_SWG_all[df_SWG_all$HR_msrd_Y_N==1  & df_SWG_all$STEPS_MSRMNT_VAL>steps_upper_limit ,]
+
+```
+
+Calculate the statistics while excluding the data points from abcd_1. Also, implement a steps_upper_limit.
+
+
+
+```{r}
+library(data.table)
+library(moments) 
+
+steps_upper_limit = 200
+setDT(df_SWG_all)  
+
+```
+
+
+
+
+```{r}
+all_participants_SWG_stats <- df_SWG_all[
+  # Original conditions
+  HR_msrd_Y_N == 1 & 
+  ACTIVITY_TYPE_VAL != 0 &
+  # New exclusion conditions
+  !(HR_msrd_Y_N == 1 & ACTIVITY_TYPE_VAL == 4 & STEPS_MSRMNT_VAL > 0) &  # condition 1 of sedentary steps
+  !(HR_msrd_Y_N == 1 & STEPS_MSRMNT_VAL > steps_upper_limit),            # condition 2 of impossible number of steps. 
+  .(
+    # HR statistics
+    hr_mean = mean(HR_MSRMNT_VAL, na.rm = TRUE),
+    hr_sd = sd(HR_MSRMNT_VAL, na.rm = TRUE),
+    hr_skewness = skewness(HR_MSRMNT_VAL, na.rm = TRUE),
+    hr_kurtosis = kurtosis(HR_MSRMNT_VAL, na.rm = TRUE),
+    
+    # Steps statistics
+    steps_sum = sum(STEPS_MSRMNT_VAL, na.rm = TRUE),
+    steps_mean = mean(STEPS_MSRMNT_VAL, na.rm = TRUE),
+    steps_sd = sd(STEPS_MSRMNT_VAL, na.rm = TRUE),
+    steps_skewness = skewness(STEPS_MSRMNT_VAL, na.rm = TRUE),
+    steps_kurtosis = kurtosis(STEPS_MSRMNT_VAL, na.rm = TRUE),
+    
+    n_observations = .N
+  ),
+  by = .(prtcpt_id, day, ACTIVITY_TYPE_VAL)
+]
+```
+
+
+
+
+```{r}
+HR_STEPS_filtered_stats_SWG_all_ptcpt <- all_participants_SWG_stats %>%
+  pivot_wider(
+    id_cols = c(prtcpt_id, day),
+    names_from = ACTIVITY_TYPE_VAL,
+    names_glue = "{.value}_type_{ACTIVITY_TYPE_VAL}",
+    values_from = c(hr_mean, hr_sd, hr_skewness, hr_kurtosis, 
+                   steps_sum, steps_mean, steps_sd, 
+                   steps_skewness, steps_kurtosis, n_observations)
+  )
+```
+
+Add the information about date for each of the participant-day combination.Tehn you can add demographic information and do regression models again.
+
+
+```{r}
+# Map the date for participant-day
+date_mapping <- df_SWG_all[, .(date = as.Date(msmt_instant)[1]), by = .(prtcpt_id, day)]
+```
+
+Combine the dates with the stats of physiological data HR_STEPS_filtered_stats_SWG_all_ptcpt
+
+```{r}
+HR_STEPS_filtered_stats_SWG_all_ptcpt <- HR_STEPS_filtered_stats_SWG_all_ptcpt %>%
+  left_join(date_mapping, by = c("prtcpt_id", "day"))
+```
+
+Combine HR_STEPS_filtered_stats_SWG_all_ptcpt with demography and MOOD, so that you can do regression with demography, physiological data and MOOD. 
+
+```{r}
+library(dplyr)
+
+df_HR_STEPS_stats_demo_MOOD_120 <- HR_STEPS_filtered_stats_SWG_all_ptcpt %>% 
+  left_join(df_MOOD_120_with_demographics %>% 
+      select(STUDY_PRTCPT_ID, MOOD_report_date, INT_SRVY_RSPNS),
+    by = c(
+      "prtcpt_id" = "STUDY_PRTCPT_ID",
+      "date" = "MOOD_report_date"
+    )
+  )
+
+# This data set df_HR_STEPS_stats_demo_MOOD_120 represents days for which we have both physiological signals as well as self reported MOOD. There are a few days, where fitbit data is not present but MOOD score is present.
+```
+
+
+```{r}
+# Add the demographic values to it 
+
+library(dplyr)
+
+# First, get unique participant-demographic pairs
+participant_demographics <- roadmap_IDs_with_demographics %>%
+  select(rm_access_code , Age, Age_capped_25,Sex) %>%
+  distinct()
+
+# Now join this with your main dataframe
+df_HR_STEPS_stats_demo_MOOD_120 <- df_HR_STEPS_stats_demo_MOOD_120 %>%
+  left_join(
+    participant_demographics,
+    by = c("prtcpt_id" = "rm_access_code")
+  )
+```
+
+
+```{r}
+df_HR_STEPS_stats_demo_MOOD_120 <- df_HR_STEPS_stats_demo_MOOD_120%>%
+                     mutate(total_wear_time = n_observations_type_5+ n_observations_type_6+ n_observations_type_4+ n_observations_type_7 )
+```
+
+Calculate additional parameters related to step counts and then do the regression models. 
+
+
+```{r}
+# df_HR_STEPS_stats_demo_MOOD_120 <- df_HR_STEPS_stats_demo_MOOD_120 %>%
+#   mutate(
+#     # Calculate total steps - explicit sum
+#     Steps_total = steps_sum_type_5 + steps_sum_type_6 + steps_sum_type_4 + steps_sum_type_7,
+#     
+#     # Calculate proportions
+#     prop_steps_type_5 = steps_sum_type_5 / Steps_total,
+#     prop_steps_type_6 = steps_sum_type_6 / Steps_total,
+#     prop_steps_type_4 = steps_sum_type_4 / Steps_total,
+#     prop_steps_type_7 = steps_sum_type_7 / Steps_total,
+#     
+#     # Replace NaN with 0 - explicit replacement for each column
+#     prop_steps_type_5 = ifelse(is.nan(prop_steps_type_5), 0, prop_steps_type_5),
+#     prop_steps_type_6 = ifelse(is.nan(prop_steps_type_6), 0, prop_steps_type_6),
+#     prop_steps_type_4 = ifelse(is.nan(prop_steps_type_4), 0, prop_steps_type_4),
+#     prop_steps_type_7 = ifelse(is.nan(prop_steps_type_7), 0, prop_steps_type_7)
+#   )
+```
+
+> colSums(is.na(df_HR_STEPS_stats_demo_MOOD_120))
+            prtcpt_id                   day        hr_mean_type_5        hr_mean_type_6        hr_mean_type_4        hr_mean_type_7          hr_sd_type_5          hr_sd_type_6 
+                    0                     0                    55                   638                     3                   711                    64                   664 
+         hr_sd_type_4          hr_sd_type_7    hr_skewness_type_5    hr_skewness_type_6    hr_skewness_type_4    hr_skewness_type_7    hr_kurtosis_type_5    hr_kurtosis_type_6 
+                   15                   743                    64                   664                    16                   746                    64                   664 
+   hr_kurtosis_type_4    hr_kurtosis_type_7      steps_sum_type_5      steps_sum_type_6      steps_sum_type_4      steps_sum_type_7     steps_mean_type_5     steps_mean_type_6 
+                   16                   746                    55                   638                     3                   711                    55                   638 
+    steps_mean_type_4     steps_mean_type_7       steps_sd_type_5       steps_sd_type_6       steps_sd_type_4       steps_sd_type_7 steps_skewness_type_5 steps_skewness_type_6 
+                    3                   711                    64                   664                    15                   743                    65                   666 
+steps_skewness_type_4 steps_skewness_type_7 steps_kurtosis_type_5 steps_kurtosis_type_6 steps_kurtosis_type_4 steps_kurtosis_type_7 n_observations_type_5 n_observations_type_6 
+                 1874                   750                    65                   666                  1874                   750                    55                   638 
+n_observations_type_4 n_observations_type_7                  date        INT_SRVY_RSPNS                   Age         Age_capped_25                   Sex       total_wear_time 
+                    3                   711                     0                  1233                    88                    88                    62                   717 
+          Steps_total     prop_steps_type_5     prop_steps_type_6     prop_steps_type_4     prop_steps_type_7 
+                  717                   717                   717                   717                   717 
+                  
+It ends up being lot's of NA values, so I am replacing NA values with 0's.                   
+
+```{r}
+df_HR_STEPS_stats_demo_MOOD_120 <- df_HR_STEPS_stats_demo_MOOD_120 %>%
+  mutate(
+   
+    steps_sum_type_5_temp = ifelse(is.na(steps_sum_type_5), 0, steps_sum_type_5),
+    steps_sum_type_6_temp = ifelse(is.na(steps_sum_type_6), 0, steps_sum_type_6),
+    steps_sum_type_4_temp = ifelse(is.na(steps_sum_type_4), 0, steps_sum_type_4),
+    steps_sum_type_7_temp = ifelse(is.na(steps_sum_type_7), 0, steps_sum_type_7),
+    
+    
+    Steps_total = steps_sum_type_5_temp + steps_sum_type_6_temp + 
+                  steps_sum_type_4_temp + steps_sum_type_7_temp,
+    
+    
+    prop_steps_type_5 = steps_sum_type_5_temp / Steps_total,
+    prop_steps_type_6 = steps_sum_type_6_temp / Steps_total,
+    prop_steps_type_4 = steps_sum_type_4_temp / Steps_total,
+    prop_steps_type_7 = steps_sum_type_7_temp / Steps_total,
+    
+   
+    prop_steps_type_5 = ifelse(is.nan(prop_steps_type_5), 0, prop_steps_type_5),
+    prop_steps_type_6 = ifelse(is.nan(prop_steps_type_6), 0, prop_steps_type_6),
+    prop_steps_type_4 = ifelse(is.nan(prop_steps_type_4), 0, prop_steps_type_4),
+    prop_steps_type_7 = ifelse(is.nan(prop_steps_type_7), 0, prop_steps_type_7),
+    
+    
+    Steps_total = ifelse(is.na(steps_sum_type_5) & is.na(steps_sum_type_6) & 
+                        is.na(steps_sum_type_4) & is.na(steps_sum_type_7), 
+                        NA, Steps_total),
+    
+    
+    prop_steps_type_5 = ifelse(is.na(Steps_total), NA, prop_steps_type_5),
+    prop_steps_type_6 = ifelse(is.na(Steps_total), NA, prop_steps_type_6),
+    prop_steps_type_4 = ifelse(is.na(Steps_total), NA, prop_steps_type_4),
+    prop_steps_type_7 = ifelse(is.na(Steps_total), NA, prop_steps_type_7)
+  ) %>%
+  
+  select(-ends_with("_temp"))
+```
+
+Let us do several regression models: 
+
+```{r}
+library(lmerTest)
+
+df_regression <- df_HR_STEPS_stats_demo_MOOD_120 %>% 
+                         select(prtcpt_id, date, hr_mean_type_4, hr_sd_type_4, Age_capped_25, Sex, INT_SRVY_RSPNS  )
+
+df_regression <- df_regression %>%
+  mutate(
+    hr_mean_type_4 = scale(hr_mean_type_4),
+    hr_sd_type_4 = scale(hr_sd_type_4)
+
+  )
+
+# Basic model with all predictors
+model1 <- lmer(INT_SRVY_RSPNS ~ hr_mean_type_4 + hr_sd_type_4 + Age_capped_25 + Sex + (1 | prtcpt_id), data = df_regression, na.action = na.omit)
+
+# icc(model1)
+# summary(model1)
+```
+
+
+
+
+
+
+
+```{r}
+df_regression <- df_HR_STEPS_stats_demo_MOOD_120 %>% 
+                         select(prtcpt_id, date, hr_mean_type_4, Age_capped_25, Sex, hr_sd_type_4, steps_sum_type_7,prop_steps_type_7, Steps_total, INT_SRVY_RSPNS  )
+
+df_regression <- df_regression %>%
+  mutate(
+    hr_mean_type_4 = scale(hr_mean_type_4),
+    hr_sd_type_4 = scale(hr_sd_type_4),
+    Age_capped_25 = scale(Age_capped_25),
+    Steps_total = scale(Steps_total),
+    
+    steps_sum_type_7 = scale(steps_sum_type_7)
+    # n_observations_type_7 = scale(n_observations_type_7)
+  )
+model2 <- lmer(INT_SRVY_RSPNS ~ Age_capped_25 + Sex +  steps_sum_type_7 +  (1 | prtcpt_id), data = df_regression, na.action = na.omit)
+```
+
+
+
+
+```{r}
+
+df_regression <- df_HR_STEPS_stats_demo_MOOD_120 %>% 
+                         select(prtcpt_id, date,  Age_capped_25, Sex,  steps_sum_type_7, steps_sum_type_6,hr_mean_type_4, hr_sd_type_4, prop_steps_type_6, prop_steps_type_7, Steps_total, INT_SRVY_RSPNS  )
+
+df_regression <- df_regression %>%
+  mutate(
+    hr_mean_type_4 = scale(hr_mean_type_4),
+    hr_sd_type_4 = scale(hr_sd_type_4),
+    Age_capped_25 = scale(Age_capped_25),
+    Steps_total = scale(Steps_total),
+    steps_sum_type_6= scale(steps_sum_type_6),
+    
+    
+    steps_sum_type_7 = scale(steps_sum_type_7)
+    # n_observations_type_7 = scale(n_observations_type_7)
+  )
+model3 <- lmer(INT_SRVY_RSPNS ~ Age_capped_25 + Sex +  steps_sum_type_7 + steps_sum_type_6+ Steps_total+ (1 | prtcpt_id), data = df_regression, na.action = na.omit)
+# icc(model3)
+# summary(model3)
+```
+
+
+
+```{r}
+model4 <- lmer(INT_SRVY_RSPNS ~ Age_capped_25 + Sex +  steps_sum_type_7 + steps_sum_type_6+ hr_mean_type_4+ hr_sd_type_4+ Steps_total+ (1 | prtcpt_id), data = df_regression, na.action = na.omit)
+# icc(model4)
+# summary(model4)
+
+```
+
+
+
+
+```{r}
+model5 <- lmer(INT_SRVY_RSPNS ~ Age_capped_25 + Sex +  steps_sum_type_7 + steps_sum_type_6+ prop_steps_type_6 + prop_steps_type_7+  hr_mean_type_4+ hr_sd_type_4+ Steps_total+ (1 | prtcpt_id), data = df_regression, na.action = na.omit)
+# icc(model5)
+# summary(model5)
+```
+
+
+```{r}
+model6 <- lmer(INT_SRVY_RSPNS ~ Age_capped_25 + Sex +  steps_sum_type_7 + steps_sum_type_6+ prop_steps_type_6 + prop_steps_type_7+  hr_mean_type_4+ hr_sd_type_4+ Steps_total+ (1 | prtcpt_id), data = df_regression, na.action = na.omit)
+# icc(model6)
+# summary(model6)
+```
+
+
+```{r}
+model7 <- lmer(INT_SRVY_RSPNS ~ Age_capped_25 + Sex +   prop_steps_type_6 + prop_steps_type_7+  hr_mean_type_4+ hr_sd_type_4+ Steps_total+ (1 | prtcpt_id), data = df_regression, na.action = na.omit)
+# icc(model7)
+# summary(model7)
+```
+
+
+
+```{r}
+model8 <- lmer(INT_SRVY_RSPNS ~ Age_capped_25 + Sex +   prop_steps_type_6 + prop_steps_type_7+   Steps_total+ (1 | prtcpt_id), data = df_regression, na.action = na.omit)
+# icc(model8)
+# summary(model8)
+```
+
+
+
+```{r}
+df_regression <- df_HR_STEPS_stats_demo_MOOD_120 %>% 
+                         select(prtcpt_id, date,  Age_capped_25, Sex, hr_mean_type_4, hr_sd_type_4,steps_sum_type_5,  prop_steps_type_5, Steps_total, INT_SRVY_RSPNS  )
+
+df_regression <- df_regression %>%
+  mutate(
+    hr_mean_type_4 = scale(hr_mean_type_4),
+    hr_sd_type_4 = scale(hr_sd_type_4),
+    Age_capped_25 = scale(Age_capped_25),
+    Steps_total = scale(Steps_total),
+    steps_sum_type_5= scale(steps_sum_type_5)
+    
+  )
+model9 <- lmer(INT_SRVY_RSPNS ~ Age_capped_25 + Sex +  steps_sum_type_5 +  Steps_total+ (1 | prtcpt_id), data = df_regression, na.action = na.omit)
+# icc(model9)
+# summary(model9)
+```
+
+
+
+```{r}
+model10 <- lmer(INT_SRVY_RSPNS ~ Age_capped_25 + Sex +  steps_sum_type_5 +  Steps_total+ hr_mean_type_4 + hr_sd_type_4+  (1 | prtcpt_id), data = df_regression, na.action = na.omit)
+# icc(model10)
+# summary(model10)
+```
+
+
+
+```{r}
+model11 <- lmer(INT_SRVY_RSPNS ~ Age_capped_25 + Sex +   Steps_total+ hr_mean_type_4 + hr_sd_type_4+  (1 | prtcpt_id), data = df_regression, na.action = na.omit)
+# icc(model11)
+# summary(model11)
+```
+
+
+
+```{r}
+model12 <- lmer(INT_SRVY_RSPNS ~ Age_capped_25 + Sex +   Steps_total + prop_steps_type_5   + hr_mean_type_4 + hr_sd_type_4+  (1 | prtcpt_id), data = df_regression, na.action = na.omit)
+# icc(model12)
+# summary(model12)
+```
+
+
+
+```{r}
+
+df_regression <- df_HR_STEPS_stats_demo_MOOD_120 %>% 
+                         select(prtcpt_id, date,  Age_capped_25, Sex, hr_mean_type_4, hr_sd_type_4,   steps_sum_type_5,  steps_sum_type_6, steps_sum_type_7,   prop_steps_type_5, prop_steps_type_6, prop_steps_type_7, Steps_total, INT_SRVY_RSPNS  )
+
+df_regression <- df_regression %>%
+  mutate(
+    hr_mean_type_4 = scale(hr_mean_type_4),
+    hr_sd_type_4 = scale(hr_sd_type_4),
+    Age_capped_25 = scale(Age_capped_25),
+    Steps_total = scale(Steps_total),
+    steps_sum_type_5= scale(steps_sum_type_5),
+    steps_sum_type_6= scale(steps_sum_type_6),
+    steps_sum_type_7= scale(steps_sum_type_7)
+    
+  )
+model13 <- lmer(INT_SRVY_RSPNS ~ Age_capped_25 + Sex +  steps_sum_type_6 +  steps_sum_type_7+   prop_steps_type_5 +  prop_steps_type_6 + prop_steps_type_7+ Steps_total+ (1 | prtcpt_id), data = df_regression, na.action = na.omit)
+# icc(model13)
+# summary(model13)
+
+```
+
+
+```{r}
+model14 <- lmer(INT_SRVY_RSPNS ~ Age_capped_25 + Sex + hr_mean_type_4+  hr_sd_type_4 + steps_sum_type_6 +  steps_sum_type_7+   prop_steps_type_5 +  prop_steps_type_6 + prop_steps_type_7+ Steps_total+ (1 | prtcpt_id), data = df_regression, na.action = na.omit)
+# icc(model14)
+# summary(model14)
+```
+
+
+
+```{r}
+library(lmerTest)
+
+df_regression <- df_HR_STEPS_stats_demo_MOOD_120 %>% 
+                         select(prtcpt_id, date, Steps_total, Age_capped_25, Sex, INT_SRVY_RSPNS  )
+
+df_regression <- df_regression %>%
+  mutate(
+    Steps_total = Steps_total/10000
+  
+
+  )
+
+
+modelb <- lmer(INT_SRVY_RSPNS ~ Steps_total + Age_capped_25 + Sex + (1 | prtcpt_id), data = df_regression, na.action = na.omit)
+# 
+# icc(modelb)
+# summary(modelb)
+```
+Put a upper cap on steps_total 
+
+```{r}
+
+df_regression <- df_HR_STEPS_stats_demo_MOOD_120 %>% 
+                         select(prtcpt_id, date, steps_sum_type_5, steps_sum_type_6, steps_sum_type_7, Age_capped_25, Sex, INT_SRVY_RSPNS  )
+
+df_regression <- df_regression %>%
+  mutate(
+    steps_sum_type_5 = steps_sum_type_5/10000,
+    steps_sum_type_6 = steps_sum_type_6/10000,
+    steps_sum_type_7 = steps_sum_type_7/10000,
+
+
+
+  )
+
+
+modela <- lmer(INT_SRVY_RSPNS ~ steps_sum_type_5 + steps_sum_type_6 + steps_sum_type_7 + Age_capped_25 + Sex + (1 | prtcpt_id), data = df_regression, na.action = na.omit)
+
+# icc(modela)
+# summary(modela)
+```
+
+```{r}
+df_regression <- df_HR_STEPS_stats_demo_MOOD_120 %>% 
+                         select(prtcpt_id, date, prop_steps_type_5, prop_steps_type_6, prop_steps_type_4, prop_steps_type_7, Age_capped_25, Sex, INT_SRVY_RSPNS  )
+
+# df_regression <- df_regression %>%
+#   mutate(
+#     steps_sum_type_5 = steps_sum_type_5/10000,
+#     steps_sum_type_6 = steps_sum_type_6/10000,
+#     steps_sum_type_7 = steps_sum_type_7/10000,
+# 
+# 
+# 
+#   )
+
+
+modela <- lmer(INT_SRVY_RSPNS ~ prop_steps_type_5 + prop_steps_type_6 + prop_steps_type_4 + prop_steps_type_7 +    Age_capped_25 + Sex + (1 | prtcpt_id), data = df_regression, na.action = na.omit)
+
+# icc(modela)
+# summary(modela)
+```
+
+Recall that you have a data frame of MOOD with demography. Put it together with sleep data with classic and stages types separately. 
+
+
+```{r}
+df_sleep_classic <- df_sleep_details[df_sleep_details$TYPE == "classic",]
+df_sleep_stages <- df_sleep_details[df_sleep_details$TYPE == "stages",]
+
+```
+
+Let us put it together with the MOOD data from the study period along with the demography of the group. We will keep the demograhpic variables in all of the regression models. 
+
+```{r}
+df_sleep_classic_columns <- df_sleep_classic %>%
+  select(where(~!all(is.na(.))))
+
+df_sleep_stages_columns <- df_sleep_stages %>%
+  select(where(~!all(is.na(.))))
+
+```
+
+Combine these sleep details with the MOOD and demographic variable coming from df_MOOD_120_with_demographics and do the regression models. 
+
+
+```{r}
+# First convert SLEEP_DATE to Date type
+df_sleep_stages_columns$SLEEP_DATE <- as.Date(df_sleep_stages_columns$SLEEP_DATE)
+
+# Now perform the join
+df_MOOD_sleep_stages_120 <- df_MOOD_120_with_demographics %>%
+  inner_join(df_sleep_stages_columns,
+            by = c("STUDY_PRTCPT_ID" = "STUDY_PRTCPT_ID",
+                  "MOOD_report_date" = "SLEEP_DATE"))
+
+
+# First convert SLEEP_DATE to Date type
+df_sleep_classic_columns$SLEEP_DATE <- as.Date(df_sleep_classic_columns$SLEEP_DATE)
+
+# Now perform the join
+df_MOOD_sleep_classisc_120 <- df_MOOD_120_with_demographics %>%
+  inner_join(df_sleep_classic_columns,
+            by = c("STUDY_PRTCPT_ID" = "STUDY_PRTCPT_ID",
+                  "MOOD_report_date" = "SLEEP_DATE"))
+
+
+```
+
+
+
+
+```{r}
+# Check for duplicate participant-date combinations in mood data
+df_MOOD_120_with_demographics %>%
+  group_by(STUDY_PRTCPT_ID, MOOD_report_date) %>%
+  filter(n() > 1) %>%
+  arrange(STUDY_PRTCPT_ID, MOOD_report_date)
+
+# Check for duplicate participant-date combinations in sleep data
+df_sleep_stages_columns %>%
+  group_by(STUDY_PRTCPT_ID, SLEEP_DATE) %>%
+  filter(n() > 1) %>%
+  arrange(STUDY_PRTCPT_ID, SLEEP_DATE)
+
+```
+
+
+```{r}
+# For mood data, take the mean mood if multiple entries exist
+df_mood_deduplicated <- df_MOOD_120_with_demographics %>%
+  group_by(STUDY_PRTCPT_ID, MOOD_report_date) %>%
+  summarise(
+    INT_SRVY_RSPNS = max(INT_SRVY_RSPNS),
+    Age = first(Age),
+    Sex = first(Sex),
+    Age_capped_25 = first(Age_capped_25)
+  )
+
+# For sleep data, take the longest sleep duration if multiple entries exist
+df_sleep_stages_deduplicated <- df_sleep_stages_columns %>%
+  group_by(STUDY_PRTCPT_ID, SLEEP_DATE) %>%
+  slice_max(ASLEEP_VALUE, n = 1)
+
+# Then join the deduplicated dataframes
+df_MOOD_120_sleep_stages_deduplicated <- df_mood_deduplicated %>%
+  inner_join(df_sleep_stages_deduplicated,
+            by = c("STUDY_PRTCPT_ID" = "STUDY_PRTCPT_ID",
+                  "MOOD_report_date" = "SLEEP_DATE"))
+
+
+
+# For sleep data, take the longest sleep duration if multiple entries exist
+df_sleep_classic_deduplicated <- df_sleep_classic_columns %>%
+  group_by(STUDY_PRTCPT_ID, SLEEP_DATE) %>%
+  slice_max(ASLEEP_VALUE, n = 1)
+
+# Then join the deduplicated dataframes
+df_MOOD_120_sleep_classic_deduplicated <- df_mood_deduplicated %>%
+  inner_join(df_sleep_classic_deduplicated,
+            by = c("STUDY_PRTCPT_ID" = "STUDY_PRTCPT_ID",
+                  "MOOD_report_date" = "SLEEP_DATE"))
+
+
+```
+
+colSums(is.na(df_MOOD_120_sleep_stages_deduplicated))
+ STUDY_PRTCPT_ID MOOD_report_date   INT_SRVY_RSPNS              Age              Sex    Age_capped_25                X SLEEP_SUMMARY_ID 
+               0                0                0                0               20                0                0                0 
+        STUDY_ID SLEEP_START_DATE   SLEEP_END_DATE     ASLEEP_VALUE      INBED_VALUE         DEEP_MIN       DEEP_COUNT        LIGHT_MIN 
+               0                0                0                0                0                0                0                0 
+     LIGHT_COUNT          REM_MIN        REM_COUNT         WAKE_MIN       WAKE_COUNT             TYPE 
+               0                0                0                0                0                0 
+               
+               
+There are not many NA values.     
+
+Explore regression models on it. 
+
+```{r}
+df_regression <- df_MOOD_120_sleep_stages_deduplicated 
+
+df_regression <- df_regression %>%
+  mutate(
+    ASLEEP_VALUE  = ASLEEP_VALUE /60,
+    INBED_VALUE   = INBED_VALUE /60,
+    DEEP_MIN      = DEEP_MIN /60,
+    LIGHT_MIN     = LIGHT_MIN /60,
+    REM_MIN       = REM_MIN /60,
+    WAKE_MIN      = WAKE_MIN/60  
+
+
+
+  )
+
+model15 <- lmer(INT_SRVY_RSPNS ~ ASLEEP_VALUE +  Age_capped_25 + Sex + (1 | STUDY_PRTCPT_ID ), data = df_regression, na.action = na.omit)
+
+# modela <- lmer(INT_SRVY_RSPNS ~ steps_sum_type_5 + steps_sum_type_6 + steps_sum_type_7 + Age_capped_25 + Sex + (1 | prtcpt_id), data = df_regression, na.action = na.omit)
+
+# icc(model15)
+# summary(model15)
+
+```
+
+
+```{r}
+model16 <- lmer(INT_SRVY_RSPNS ~ DEEP_MIN  +  Age_capped_25 + Sex + (1 | STUDY_PRTCPT_ID ), data = df_regression, na.action = na.omit)
+
+```
+
+
+```{r}
+model17 <- lmer(INT_SRVY_RSPNS ~ DEEP_MIN  + REM_MIN + Age_capped_25 + Sex + (1 | STUDY_PRTCPT_ID ), data = df_regression, na.action = na.omit)
+
+```
+
+
+
+```{r}
+model18 <- lmer(INT_SRVY_RSPNS ~ ASLEEP_VALUE + DEEP_MIN  + REM_MIN + Age_capped_25 + Sex + (1 | STUDY_PRTCPT_ID ), data = df_regression, na.action = na.omit)
+
+```
+
+
+
+```{r}
+model19 <- lmer(INT_SRVY_RSPNS ~ ASLEEP_VALUE + DEEP_MIN  + REM_MIN + WAKE_MIN+ Age_capped_25 + Sex + (1 | STUDY_PRTCPT_ID ), data = df_regression, na.action = na.omit)
+```
+
+
+
+```{r}
+model20 <- lmer(INT_SRVY_RSPNS ~ ASLEEP_VALUE + DEEP_MIN*DEEP_COUNT + REM_MIN + WAKE_MIN+ Age_capped_25 + Sex + (1 | STUDY_PRTCPT_ID ), data = df_regression, na.action = na.omit)
+```
+
+
+```{r}
+model21 <- lmer(INT_SRVY_RSPNS ~ ASLEEP_VALUE + DEEP_MIN*DEEP_COUNT + REM_MIN + WAKE_COUNT + Age_capped_25 + Sex + (1 | STUDY_PRTCPT_ID ), data = df_regression, na.action = na.omit)
+```
+
+
+```{r}
+model22 <- lmer(INT_SRVY_RSPNS ~ ASLEEP_VALUE +  REM_MIN + WAKE_MIN*WAKE_COUNT + Age_capped_25 + Sex + (1 | STUDY_PRTCPT_ID ), data = df_regression, na.action = na.omit)
+```
+
+
+```{r}
+model23 <- lmer(INT_SRVY_RSPNS ~ ASLEEP_VALUE +  REM_MIN*REM_COUNT +  Age_capped_25 + Sex + (1 | STUDY_PRTCPT_ID ), data = df_regression, na.action = na.omit)
+```
+
+
+```{r}
+model24 <- lmer(INT_SRVY_RSPNS ~  LIGHT_MIN*LIGHT_COUNT +  Age_capped_25 + Sex + (1 | STUDY_PRTCPT_ID ), data = df_regression, na.action = na.omit)
+```
+
+
+
+```{r}
+model25 <- lmer(INT_SRVY_RSPNS ~  LIGHT_MIN*LIGHT_COUNT + DEEP_MIN*DEEP_COUNT +  Age_capped_25 + Sex + (1 | STUDY_PRTCPT_ID ), data = df_regression, na.action = na.omit)
+
+```
+
+```{r}
+model26 <- lmer(INT_SRVY_RSPNS ~  LIGHT_MIN*LIGHT_COUNT + DEEP_MIN*DEEP_COUNT +   REM_MIN*REM_COUNT+ Age_capped_25 + Sex + (1 | STUDY_PRTCPT_ID ), data = df_regression, na.action = na.omit)
+```
+
+
+```{r}
+model27 <- lmer(INT_SRVY_RSPNS ~  ASLEEP_VALUE +  REM_MIN*REM_COUNT +    Age_capped_25 + Sex + (1 | STUDY_PRTCPT_ID ), data = df_regression, na.action = na.omit)
+
+summary(model27)
+```
+```{r}
+df_regression <- df_regression%>% 
+                mutate(efficiency = REM_MIN/(ASLEEP_VALUE- REM_MIN))
+```
+
+
+```{r}
+model27 <- lmer(INT_SRVY_RSPNS ~  ASLEEP_VALUE +  efficiency +    Age_capped_25 + Sex + (1 | STUDY_PRTCPT_ID ), data = df_regression, na.action = na.omit)
+
+summary(model27)
+
+```
+
+
+
+```{r}
+df_regression_classic <- df_MOOD_120_sleep_classic_deduplicated 
+
+df_regression_classic <- df_regression_classic %>%
+  mutate(
+    ASLEEP_VALUE  = ASLEEP_VALUE /60,
+    INBED_VALUE   = INBED_VALUE /60,
+    ASLEEP_MIN      = ASLEEP_MIN /60
+
+
+  )
+
+model28 <- lmer(INT_SRVY_RSPNS ~ ASLEEP_VALUE +  Age_capped_25 + Sex + (1 | STUDY_PRTCPT_ID ), data = df_regression_classic, na.action = na.omit)
+
+```
+
+
+```{r}
+model29 <- lmer(INT_SRVY_RSPNS ~ AWAKE_MIN*AWAKE_COUNT + ASLEEP_MIN*ASLEEP_COUNT+ Age_capped_25 + Sex + (1 | STUDY_PRTCPT_ID ), data = df_regression_classic, na.action = na.omit)
+
+summary(model29)
+```
+
+```{r}
+model30 <- lmer(INT_SRVY_RSPNS ~ RESTLESS_MIN*RESTLESS_COUNT + Age_capped_25 + Sex + (1 | STUDY_PRTCPT_ID ), data = df_regression_classic, na.action = na.omit)
+
+summary(model30)
+```
+
+
+```{r}
+print("entire code ran successfully")
+```
+
+
+
+
+
+
+
