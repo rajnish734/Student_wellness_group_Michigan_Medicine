@@ -1,0 +1,380 @@
+---
+title: "plots_SWG_monthly"
+author: "Rajnish Kumar"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+Do some plots for Xiao's paper, or may be just a table is fine. 
+```{r}
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(lubridate)
+library(Matrix)
+library(lme4)
+library(lme4)
+library(lmerTest)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r}
+df_sleep <-read.csv('C:\\Users\\rajnishk\\OneDrive - Michigan Medicine\\Documents\\Student Wellness Dataset\\student_wellness_sleep_details.csv')
+df_MOOD <- read.csv('C:\\Users\\rajnishk\\OneDrive - Michigan Medicine\\Documents\\Student Wellness Dataset\\df_MOOD_SWG.csv')
+df_step_20 <- read.csv('C:\\Users/rajnishk/OneDrive - Michigan Medicine/Documents/Student Wellness Dataset/df_step_20.csv')
+
+```
+
+Read the roadmap IDs.
+```{r}
+df_MOOD_time <- read.csv("C:\\Users\\rajnishk\\OneDrive - Michigan Medicine\\Documents\\Student Wellness Dataset\\SWG_mood_time_entry.csv")
+```
+
+
+```{r}
+roadmap_IDs <- read.csv('C:\\Users\\rajnishk\\OneDrive - Michigan Medicine\\Documents\\Dr_Sung_group\\StudentWellness_RoadmapID.csv')
+```
+
+
+
+
+```{r}
+roadmap_IDs$onboard_date <- as.POSIXct(roadmap_IDs$onboard_date, format = "%m/%d/%y")
+df_MOOD$METRIC_START_DATE <- as.POSIXct(df_MOOD$METRIC_START_DATE, format = "%Y-%m-%d")
+df_MOOD$METRIC_END_DATE <- as.POSIXct(df_MOOD$METRIC_END_DATE, format = "%Y-%m-%d")
+```
+
+Read their Device IDs
+
+```{r}
+device_IDs <- read.csv("C:\\Users\\rajnishk\\OneDrive - Michigan Medicine\\Documents\\Student Wellness Dataset\\Device_ID.csv")
+device_IDs <- device_IDs[device_IDs$PRTCPT_DVC_TYP_ID == 1,]
+```
+
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+Don't exclude all the values where MOOD score was not entered. 
+
+Add the columns of day 0 which is the baseline, to day 120, which should be the exit survey day. 
+
+```{r}
+# First, let's ensure the required libraries are loaded
+# Method 1: Truncate timestamps to dates before calculation
+df_MOOD_with_days <- df_MOOD %>%
+  left_join(
+    roadmap_IDs %>% 
+      select(rm_access_code, onboard_date),
+    by = c("STUDY_PRTCPT_ID" = "rm_access_code")
+  ) %>%
+  mutate(
+    # Convert timestamps to dates before calculating difference
+    METRIC_START_DATE = as.Date(METRIC_START_DATE),
+    onboard_date = as.Date(onboard_date),
+    day_number = as.numeric(
+      difftime(
+        METRIC_START_DATE,
+        onboard_date,
+        units = "days"
+      )
+    )
+  ) # %>%
+  # Remove the temporary onboard_date column if you don't need it
+  # %>% select(-onboard_date) # There is another 
+
+# Verify the results
+# Check a few rows to ensure the calculation is correct
+head(df_MOOD_with_days[c("STUDY_PRTCPT_ID", "METRIC_START_DATE", "day_number")], 10)
+
+# Optional: Check if any participants weren't matched
+unmatched_participants <- df_MOOD_with_days %>%
+  filter(is.na(day_number)) %>%
+  distinct(STUDY_PRTCPT_ID) %>%
+  pull(STUDY_PRTCPT_ID)
+
+if(length(unmatched_participants) > 0) {
+  warning("Some participants were not found in roadmap_IDs: ", 
+          paste(unmatched_participants, collapse = ", "))
+}
+
+
+
+
+```
+This is all from the file df_MOOD, which in the oracle data base is a subset of study_metric_aggregate
+
+```{r}
+library(dplyr)
+
+# Create a function to categorize day numbers into periods
+period_averages <- df_MOOD_with_days %>%
+  # Create a period column based on day_number ranges
+  mutate(
+    period = case_when(
+      day_number == 0 ~ "Day 0",
+      day_number >= 1 & day_number <= 30 ~ "Days 1-30",
+      day_number >= 31 & day_number <= 60 ~ "Days 31-60",
+      day_number >= 61 & day_number <= 90 ~ "Days 61-90",
+      day_number >= 91 & day_number <= 120 ~ "Days 91-120",
+      TRUE ~ "Other"
+    )
+  ) %>%
+  # Group by the period
+  group_by(period) %>%
+  # Calculate averages for non-zero values
+  summarise(
+    avg_steps = mean(STEP_COUNT[STEP_COUNT > 0], na.rm = TRUE),
+    n_steps = sum(STEP_COUNT > 0),  # Count of non-zero values
+    avg_sleep = mean(SLEEP_COUNT[SLEEP_COUNT > 0], na.rm = TRUE),
+    n_sleep = sum(SLEEP_COUNT > 0),  # Count of non-zero values
+    avg_mood = mean(MOOD[MOOD > 0], na.rm = TRUE),
+    n_mood = sum(MOOD > 0),  # Count of non-zero values
+    .groups = "drop"
+  ) %>%
+  # Filter out the "Other" period and arrange by period
+  filter(period != "Other") %>%
+  arrange(factor(period, levels = c("Day 0", "Days 1-30", "Days 31-60", "Days 61-90", "Days 91-120")))
+
+# Round the results to 2 decimal places for better readability
+period_averages_rounded <- period_averages %>%
+  mutate(across(starts_with("avg_"), ~round(., 2)))
+
+# Display the results
+print(period_averages_rounded)
+
+# Optional: Create a more detailed summary with standard deviations
+detailed_summary <- df_MOOD_with_days %>%
+  mutate(
+    period = case_when(
+      day_number == 0 ~ "Day 0",
+      day_number >= 1 & day_number <= 30 ~ "Days 1-30",
+      day_number >= 31 & day_number <= 60 ~ "Days 31-60",
+      day_number >= 61 & day_number <= 90 ~ "Days 61-90",
+      day_number >= 91 & day_number <= 120 ~ "Days 91-120",
+      TRUE ~ "Other"
+    )
+  ) %>%
+  group_by(period) %>%
+  summarise(
+    # Steps
+    avg_steps = mean(STEP_COUNT[STEP_COUNT > 0], na.rm = TRUE),
+    sd_steps = sd(STEP_COUNT[STEP_COUNT > 0], na.rm = TRUE),
+    n_steps = sum(STEP_COUNT > 0),
+    
+    # Sleep
+    avg_sleep = mean(SLEEP_COUNT[SLEEP_COUNT > 0], na.rm = TRUE),
+    sd_sleep = sd(SLEEP_COUNT[SLEEP_COUNT > 0], na.rm = TRUE),
+    n_sleep = sum(SLEEP_COUNT > 0),
+    
+    # Mood
+    avg_mood = mean(MOOD[MOOD > 0], na.rm = TRUE),
+    sd_mood = sd(MOOD[MOOD > 0], na.rm = TRUE),
+    n_mood = sum(MOOD > 0),
+    .groups = "drop"
+  ) %>%
+  filter(period != "Other") %>%
+  arrange(factor(period, levels = c("Day 0", "Days 1-30", "Days 31-60", "Days 61-90", "Days 91-120"))) %>%
+  mutate(across(starts_with(c("avg_", "sd_")), ~round(., 2)))
+
+# Display the detailed summary
+print(detailed_summary)
+```
+```{r}
+# write.csv(detailed_summary,
+#           file = "detailed_summary_SWG_monthly.csv",
+#           row.names = FALSE)
+```
+
+
+
+```{r}
+library(dplyr)
+
+# First, add day_number to df_sleep
+df_sleep_with_days <- df_sleep %>%
+  # Convert SLEEP_DATE to Date type
+  mutate(SLEEP_DATE = as.Date(SLEEP_DATE)) %>%
+  # Join with roadmap_IDs to get onboard_date
+  left_join(
+    roadmap_IDs %>% 
+      select(rm_access_code, onboard_date),
+    by = c("STUDY_PRTCPT_ID" = "rm_access_code")
+  ) %>%
+  # Calculate day_number
+  mutate(
+    day_number = as.numeric(SLEEP_DATE - as.Date(onboard_date))
+  )
+```
+
+
+```{r}
+# Calculate statistics for sleep stages
+sleep_stages_summary <- df_sleep_with_days %>%
+  # Filter for "stages" type data since classic type doesn't have these metrics
+  filter(TYPE == "stages") %>%
+  # Create period categories
+  mutate(
+    period = case_when(
+      day_number == 0 ~ "Day 0",
+      day_number >= 1 & day_number <= 30 ~ "Days 1-30",
+      day_number >= 31 & day_number <= 60 ~ "Days 31-60",
+      day_number >= 61 & day_number <= 90 ~ "Days 61-90",
+      day_number >= 91 & day_number <= 120 ~ "Days 91-120",
+      TRUE ~ "Other"
+    )
+  ) %>%
+  group_by(period) %>%
+  summarise(
+    # Deep Sleep
+    avg_deep = mean(DEEP_MIN[DEEP_MIN > 0], na.rm = TRUE),
+    sd_deep = sd(DEEP_MIN[DEEP_MIN > 0], na.rm = TRUE),
+    n_deep = sum(DEEP_MIN > 0, na.rm = TRUE),
+    
+    # Light Sleep
+    avg_light = mean(LIGHT_MIN[LIGHT_MIN > 0], na.rm = TRUE),
+    sd_light = sd(LIGHT_MIN[LIGHT_MIN > 0], na.rm = TRUE),
+    n_light = sum(LIGHT_MIN > 0, na.rm = TRUE),
+    
+    # REM Sleep
+    avg_rem = mean(REM_MIN[REM_MIN > 0], na.rm = TRUE),
+    sd_rem = sd(REM_MIN[REM_MIN > 0], na.rm = TRUE),
+    n_rem = sum(REM_MIN > 0, na.rm = TRUE),
+    
+    .groups = "drop"
+  ) %>%
+  # Filter out the "Other" period
+  filter(period != "Other") %>%
+  # Arrange periods in chronological order
+  arrange(factor(period, levels = c("Day 0", "Days 1-30", "Days 31-60", "Days 61-90", "Days 91-120"))) %>%
+  # Round numerical values to 2 decimal places
+  mutate(across(starts_with(c("avg_", "sd_")), ~round(., 2)))
+
+# Display the results
+print(sleep_stages_summary)
+
+# Write the results to a CSV file
+# write.csv(sleep_stages_summary, "sleep_stages_summary_SWG_monthly.csv")
+
+```
+MOOD by hour plot 
+
+```{r}
+library(dplyr)
+library(ggplot2)
+
+# Process the data
+df_MOOD_time_processed <- df_MOOD_time %>%
+  # Convert Date to proper Date type
+  mutate(Date = as.Date(Date)) %>%
+  # Join with roadmap_IDs to get onboard_date
+  left_join(
+    roadmap_IDs %>% 
+      select(rm_access_code, onboard_date),
+    by = c("STUDY_PRTCPT_ID" = "rm_access_code")
+  ) %>%
+  # Calculate day_number and process mood scores
+  mutate(
+    day_number = as.numeric(Date - as.Date(onboard_date)),
+    # Convert INT_SRVY_RSPNS to numeric, excluding "SELECTED"
+    mood_score = as.numeric(ifelse(INT_SRVY_RSPNS == "SELECTED", NA, INT_SRVY_RSPNS)),
+    # Extract hour from time_normalized
+    hour = floor(time_normalized)
+  ) %>%
+  # Filter for days 0-120 and remove NA mood scores
+  filter(
+    day_number >= 0,
+    day_number <= 120,
+    !is.na(mood_score)
+  )
+
+# Create frequency table
+mood_frequency <- df_MOOD_time_processed %>%
+  group_by(hour, mood_score) %>%
+  summarise(count = n(), .groups = "drop")
+
+# Create the bubble plot
+mood_bubble_plot <- ggplot(mood_frequency, 
+                          aes(x = hour, 
+                              y = mood_score, 
+                              size = count, 
+                              color = mood_score)) +
+  # Add bubbles
+  geom_point(alpha = 0.7) +
+  # Customize color scale
+  scale_color_gradient2(
+    low = "purple",
+    mid = "cyan",
+    high = "yellow",
+    midpoint = 5.5,
+    name = "mood_score"
+  ) +
+  # Customize size scale
+  scale_size_continuous(
+    range = c(1, 15),
+    name = "count"
+  ) +
+  # Customize x-axis
+  scale_x_continuous(
+    breaks = 0:23,
+    labels = 0:23,
+    limits = c(-0.5, 23.5)
+  ) +
+  # Customize y-axis
+  scale_y_continuous(
+    breaks = 1:10,
+    limits = c(0.5, 10.5)
+  ) +
+  # Add labels and title
+  labs(
+    title = "Mood Score Frequency by Hour",
+    x = "Hour of Day",
+    y = "Mood Score"
+  ) +
+  # Theme customization
+  theme_minimal() +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_line(color = "gray90"),
+    axis.title = element_text(size = 12),
+    plot.title = element_text(size = 14, face = "bold"),
+    legend.position = "right",
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 8)
+  )
+
+# # Save the plot
+# ggsave("mood_frequency_bubble_plot.pdf", 
+#        mood_bubble_plot, 
+#        width = 12, 
+#        height = 8,
+#        dpi = 300)
+
+# Print summary statistics
+mood_summary <- mood_frequency %>%
+  group_by(hour) %>%
+  summarise(
+    total_responses = sum(count),
+    avg_mood = weighted.mean(mood_score, count),
+    .groups = "drop"
+  )
+print(mood_bubble_plot)
+print(mood_summary)
+```
+```{r}
+df_MOOD_with_days_120 <- df_MOOD_with_days%>%filter(day_number>=0 & day_number<=120)
+table(df_MOOD_with_days_120$MOOD)
+```
+
