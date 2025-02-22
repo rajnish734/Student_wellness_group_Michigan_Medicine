@@ -1,0 +1,495 @@
+---
+title: "Sleep analysis student wellness group"
+author: "Rajnish Kumar"
+date: "2024-05-13"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(lubridate)
+library(Matrix)
+library(lme4)
+library(lme4)
+library(lmerTest)
+library(ggplot2)
+```
+
+Sleep analysis on student wellness group
+
+```{r}
+df_sleep <-read.csv('C:\\Users\\rajnishk\\OneDrive - Michigan Medicine\\Documents\\Student Wellness Dataset\\student_wellness_sleep_details.csv')
+df_MOOD <- read.csv('C:\\Users\\rajnishk\\OneDrive - Michigan Medicine\\Documents\\Student Wellness Dataset\\df_MOOD_SWG.csv')
+```
+
+```{r}
+#df_ONC <-read.csv('C:\\Users\\rajnishk\\OneDrive - Michigan Medicine\\Desktop\\steps_onc.csv', nrows = 10)
+```
+
+
+```{r}
+df_MOOD <- df_MOOD[df_MOOD$MOOD != 0, ]
+df_MOOD <- df_MOOD %>% rename(SLEEP_DATE = METRIC_START_DATE) # So that I can join two data frames later. 
+# df_MOOD_sleep <- merge(df_sleep, df_MOOD, by = c("STUDY_PRTCPT_ID", "SLEEP_DATE"), all = FALSE)
+
+```
+
+
+```{r}
+# Define sleep variables
+sleep_vars <- c('ASLEEP_VALUE', 'INBED_VALUE', 'DEEP_MIN', 'DEEP_COUNT', 'LIGHT_MIN', 'LIGHT_COUNT', 
+                'REM_MIN', 'REM_COUNT', 'WAKE_MIN', 'WAKE_COUNT', 'ASLEEP_MIN', 'ASLEEP_COUNT', 
+                'AWAKE_COUNT', 'AWAKE_MIN', 'RESTLESS_COUNT', 'RESTLESS_MIN')
+
+v <- colSums(is.na(df_sleep[, sleep_vars]))
+v <- names(v[v < 500])
+
+vv <- c("STUDY_PRTCPT_ID", "SLEEP_START_DATE", "SLEEP_END_DATE", "SLEEP_DATE", v)
+dx <- df_sleep[, vv, drop = FALSE]
+
+```
+
+
+```{r}
+dx$YEARDAY <- yday(as.Date(dx$SLEEP_DATE))
+dx$DAYOFWEEK <- wday(as.Date(dx$SLEEP_DATE), label = FALSE) - 1  # Adjust if week start is Sunday in the given dataset
+
+# Helper function to calculate hours since midnight
+hours_since_midnight <- function(time) {
+  hour(time) + minute(time) / 60 + second(time) / 3600
+}
+
+# Calculate time-related features
+dx$SLEEP_START_TIME <- hours_since_midnight(dx$SLEEP_START_DATE)
+dx$SLEEP_END_TIME <- hours_since_midnight(dx$SLEEP_END_DATE)
+
+# Apply trigonometric transformations
+dx$SLEEP_START_SIN <- sin(2 * pi * dx$SLEEP_START_TIME / 24)
+dx$SLEEP_START_COS <- cos(2 * pi * dx$SLEEP_START_TIME / 24)
+dx$SLEEP_END_SIN <- sin(2 * pi * dx$SLEEP_END_TIME / 24)
+dx$SLEEP_END_COS <- cos(2 * pi * dx$SLEEP_END_TIME / 24)
+dx$YEARDAY_SIN <- sin(2 * pi * dx$YEARDAY / 366)
+dx$YEARDAY_COS <- cos(2 * pi * dx$YEARDAY / 366)
+```
+
+
+
+```{r}
+# Calculate STUDYDAY
+dx <- dx %>%
+  group_by(STUDY_PRTCPT_ID) %>%
+  mutate(STUDYDAY = YEARDAY - min(YEARDAY)) %>%
+  ungroup()
+
+# Drop unused columns
+#dx <- dx %>% select(-c(SLEEP_START_DATE, SLEEP_END_DATE, SLEEP_START_TIME, SLEEP_END_TIME, SLEEP_DATE))
+dx <- dx %>% select(-c(SLEEP_START_DATE, SLEEP_END_DATE, SLEEP_START_TIME, SLEEP_END_TIME))
+
+
+dx <- na.omit(dx) # Dropping rows with NA values
+
+colnames(dx) # Print remaining column names
+
+```
+
+
+```{r}
+df_MOOD_sleep_polar <- merge(dx, df_MOOD, by = c("STUDY_PRTCPT_ID", "SLEEP_DATE"), all = FALSE)
+df_MOOD_sleep_polar <- df_MOOD_sleep_polar%>% select(-c('STUDY_METRIC_AGGREGATE_ID','METRIC_END_DATE','X','METRIC_END_DATE','STUDY_ID'))
+```
+
+
+```{r}
+columns_for_norm <- c('ASLEEP_VALUE', 'INBED_VALUE', 'DEEP_MIN', 'DEEP_COUNT', 
+                      'LIGHT_MIN', 'LIGHT_COUNT', 'REM_MIN', 'REM_COUNT', 
+                      'WAKE_MIN', 'WAKE_COUNT', 'STEP_COUNT', 'SLEEP_COUNT')
+
+df_MOOD_sleep_polar_MOOD_NZ_norm <- df_MOOD_sleep_polar
+
+df_MOOD_sleep_polar_MOOD_NZ_norm[columns_for_norm] <- as.data.frame(lapply(df_MOOD_sleep_polar[columns_for_norm],function(x) {(x - mean(x)) / sd(x)}))
+
+```
+
+INBED_VALUE = ASLEEP_VALUE + WAKE_MIN         # This is not true for only two cases for df_MOOD_sleep_polar  
+abc <- df_sleep$ASLEEP_VALUE + df_sleep$WAKE_MIN - df_sleep$INBED_VALUE # mostly 0's and NA's 
+df_sleep$ASLEEP_VALUE - df_sleep$DEEP_MIN - df_sleep$LIGHT_MIN - df_sleep$REM_MIN                    # This is also mostly 0's and NA's,  THIS IS TYPE == STEAGES
+df_sleep$ASLEEP_VALUE + df_sleep$WAKE_MIN - df_sleep$INBED_VALUE                                     # This is also mostly 0's and NA's   THIS IS TYPE == STAGES  
+
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r}
+df_sleep_classic <- subset(df_sleep, TYPE == "classic")
+df_sleep_stages <- subset (df_sleep, TYPE == "stages")
+```
+
+df_sleep_classic$ASLEEP_MIN - df_sleep_classic$ASLEEP_VALUE          # This is all 0's for classic stages. 
+df_sleep_classic$ASLEEP_VALUE + df_sleep_classic$AWAKE_MIN + df_sleep_classic$RESTLESS_MIN- df_sleep_classic$INBED_VALUE    # Mostly 0's except a very few. 
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+```{r}
+# df_sleep_classic$SLEEP_START_DATE  <-as.POSIXct(df_sleep_classic$SLEEP_START_DATE, format = "%Y-%m-%d %H:%M:%S")
+# df_sleep_classic$SLEEP_END_DATE <-as.POSIXct(df_sleep_classic$SLEEP_END_DATE, format = "%Y-%m-%d %H:%M:%S")
+# df_sleep_stages$SLEEP_START_DATE  <-as.POSIXct(df_sleep_stages$SLEEP_START_DATE, format = "%Y-%m-%d %H:%M:%S")
+# df_sleep_stages$SLEEP_END_DATE <-as.POSIXct(df_sleep_stages$SLEEP_END_DATE, format = "%Y-%m-%d %H:%M:%S")
+
+```
+
+```{r}
+# time_diff_classic <- df_sleep_classic$SLEEP_START_DATE - df_sleep_classic$SLEEP_END_DATE
+# time_diff_stages <- df_sleep_stages$SLEEP_START_DATE - df_sleep_stages$SLEEP_END_DATE
+```
+
+```{r}
+# classic_stages_common_days <- intersect(df_sleep_classic$SLEEP_DATE, df_sleep_stages$SLEEP_DATE)
+# print(classic_stages_common_days)
+```
+
+participant W7LX2I74  has lots of measurements of sleep. 
+
+```{r}
+# df_sleep_classic_W7LX2I74 <- df_sleep_classic%>% filter(STUDY_PRTCPT_ID=='W7LX2I74')
+# df_sleep_stage_W7LX2I74 <- df_sleep_stages %>% filter(STUDY_PRTCPT_ID=='W7LX2I74')
+# common_classis_stages_W7LX2I74 <- intersect(df_sleep_classic_W7LX2I74$SLEEP_DATE, df_sleep_stage_W7LX2I74$SLEEP_DATE)
+```
+This confirms that on same night, participants can have both types (classic and stages).
+
+Doing prediction of MOOD from "stages" type of sleep. 
+
+```{r}
+model <- lmer(MOOD ~ SLEEP_END_SIN + SLEEP_END_COS + DEEP_MIN + (1 | STUDY_PRTCPT_ID), data = df_MOOD_sleep_polar_MOOD_NZ_norm)
+
+summary(model)
+confint(model)
+par(mfrow=c(2,2))
+plot(model)
+residuals4 <- residuals(model)
+fitted_values <- fitted(model)
+```
+```{r}
+
+```
+
+          
+ mixed effect model to predict MOOD where the predictors are SLEEP_END_SIN and DEEP_MIN, and random effect is given by STUDY_PRTCPT_ID
+
+```{r}
+# Alternatively, you can create each diagnostic plot separately:
+# Residuals vs Fitted
+plot(residuals(model) ~ fitted(model))
+abline(h = 0, col = "red")
+
+# Histogram of Residuals
+hist(residuals(model), breaks = "FD", main = "Histogram of Residuals")
+
+# Q-Q Plot of Residuals
+qqnorm(residuals(model))
+qqline(residuals(model), col = "red")
+
+# Scale-Location Plot (Spread vs Level)
+plot(fitted(model), scale(residuals(model)), main = "Scale-Location Plot")
+abline(h = 0, col = "red")
+```
+
+
+```{r}
+library(ggplot2)
+
+# Extracting random effects
+re <- ranef(model)$STUDY_PRTCPT_ID
+
+# Adding participant ID as a column
+re$ID <- rownames(re)
+
+# Basic random effects plot
+ggplot(re, aes(x = ID, y = `(Intercept)`)) +
+  geom_point() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  xlab("Participant ID") +
+  ylab("Random Intercept")
+
+# Alternatively, you can use `dotplot` from `lattice` package
+library(lattice)
+dotplot(ranef(model, condVar = TRUE))
+```
+
+```{r}
+# Assuming that MOOD is a column in your data frame with actual values
+df_MOOD_sleep_polar_MOOD_NZ_norm$predicted_MOOD <- predict(model, re.form = NA)
+
+ggplot(df_MOOD_sleep_polar_MOOD_NZ_norm, aes(x = MOOD, y = predicted_MOOD)) +
+  geom_point() +
+  geom_abline(intercept = 0, slope = 1, color = "red") +
+  xlab("Actual MOOD") +
+  ylab("Predicted MOOD") +
+  ggtitle("Predicted vs Actual MOOD Values")
+```
+
+
+```{r}
+model_lm <- lm( formula = MOOD ~ SLEEP_END_SIN  + SLEEP_END_COS + DEEP_MIN , data = df_MOOD_sleep_polar_MOOD_NZ_norm)
+
+summary(model_lm)
+par(mfrow=c(2,2))
+plot(model_lm)
+residuals4 <- residuals(model_lm)
+fitted_values <- fitted(model_lm)
+```
+
+
+```{r}
+model1 <- lmer(MOOD ~ SLEEP_COUNT + STEP_COUNT + (1 | STUDY_PRTCPT_ID), data = df_MOOD_sleep_polar_MOOD_NZ_norm)
+
+summary(model1)
+confint(model1)
+# par(mfrow=c(2,2))
+# plot(model1)
+# residuals4 <- residuals(model1)
+# fitted_values <- fitted(model1)
+
+
+```
+
+
+```{r}
+model_upto_2_interact <- lmer(MOOD ~ (DEEP_MIN + LIGHT_MIN + REM_MIN + WAKE_MIN)^2 + (1 | STUDY_PRTCPT_ID), data = df_MOOD_sleep_polar_MOOD_NZ_norm)
+summary(model_upto_2_interact)
+confint(model_upto_2_interact)
+
+# par(mfrow=c(2,2))
+# plot(model_upto_2_interact)
+# residuals_upto_2_interact <- residuals(model_upto_2_interact)
+# fitted_values_upto_2_interact <- fitted(model_upto_2_interact)
+
+```
+
+```{r}
+model_upto_2_interact_selected <- lmer(MOOD ~ (LIGHT_MIN + WAKE_MIN )^2 + (1 | STUDY_PRTCPT_ID), data = df_MOOD_sleep_polar_MOOD_NZ_norm)
+summary(model_upto_2_interact_selected)
+confint(model_upto_2_interact_selected)
+```
+
+
+```{r}
+model_upto_2_interact_selected <- lmer(MOOD ~ (DEEP_MIN + REM_MIN )^2 + (1 | STUDY_PRTCPT_ID), data = df_MOOD_sleep_polar_MOOD_NZ_norm)
+summary(model_upto_2_interact_selected)
+confint(model_upto_2_interact_selected)
+```
+
+
+```{r}
+model_upto_2_interact_selected <- lmer(MOOD ~ (DEEP_MIN + REM_MIN + ASLEEP_VALUE)^2 + (1 | STUDY_PRTCPT_ID), data = df_MOOD_sleep_polar_MOOD_NZ_norm)
+summary(model_upto_2_interact_selected)
+confint(model_upto_2_interact_selected)
+```
+```{r}
+model_upto_2_interact_selected <- lmer(MOOD ~ (DEEP_MIN + REM_MIN + ASLEEP_VALUE + SLEEP_START_SIN + SLEEP_START_COS + STEP_COUNT)^2 + (1 | STUDY_PRTCPT_ID), data = df_MOOD_sleep_polar_MOOD_NZ_norm)
+summary(model_upto_2_interact_selected)
+confint(model_upto_2_interact_selected)
+```
+```{r}
+model_upto_2_interact_selected <- lmer(MOOD ~ (DEEP_MIN + REM_MIN +  SLEEP_START_SIN + SLEEP_START_COS)^2 + (1 | STUDY_PRTCPT_ID), data = df_MOOD_sleep_polar_MOOD_NZ_norm)
+summary(model_upto_2_interact_selected)
+confint(model_upto_2_interact_selected)
+```
+
+
+```{r}
+# Alternatively, you can create each diagnostic plot separately:
+# Residuals vs Fitted
+plot(residuals(model1) ~ fitted(model1))
+abline(h = 0, col = "red")
+
+# Histogram of Residuals
+hist(residuals(model1), breaks = "FD", main = "Histogram of Residuals")
+
+# Q-Q Plot of Residuals
+qqnorm(residuals(model1))
+qqline(residuals(model1), col = "red")
+
+# Scale-Location Plot (Spread vs Level)
+plot(fitted(model1), scale(residuals(model1)), main = "Scale-Location Plot")
+abline(h = 0, col = "red")
+```
+
+
+
+```{r}
+model2 <- lmer(MOOD ~  SLEEP_COUNT + STEP_COUNT + (1 | DAYOFWEEK), data = df_MOOD_sleep_polar_MOOD_NZ_norm)
+
+summary(model2)
+confint(model2)
+plot(model2)
+```
+
+
+```{r}
+
+# Assuming that MOOD is a column in your data frame with actual values
+df_MOOD_sleep_polar_MOOD_NZ_norm$predicted_MOOD <- predict(model2, re.form = NA)
+
+ggplot(df_MOOD_sleep_polar_MOOD_NZ_norm, aes(x = MOOD, y = predicted_MOOD)) +
+  geom_point() +
+  geom_abline(intercept = 0, slope = 1, color = "red") +
+  xlab("Actual MOOD") +
+  ylab("Predicted MOOD") +
+  ggtitle("Predicted vs Actual MOOD Values")
+
+
+```
+```{r}
+# Alternatively, you can create each diagnostic plot separately:
+# Residuals vs Fitted
+plot(residuals(model2) ~ fitted(model2))
+abline(h = 0, col = "red")
+
+# Histogram of Residuals
+hist(residuals(model2), breaks = "FD", main = "Histogram of Residuals")
+
+# Q-Q Plot of Residuals
+qqnorm(residuals(model2))
+qqline(residuals(model2), col = "red")
+
+# Scale-Location Plot (Spread vs Level)
+plot(fitted(model2), scale(residuals(model2)), main = "Scale-Location Plot")
+abline(h = 0, col = "red")
+```
+
+
+
+
+```{r}
+model3 <- lmer(MOOD ~ DEEP_MIN + STEP_COUNT + (1 | STUDY_PRTCPT_ID), data = df_MOOD_sleep_polar_MOOD_NZ_norm)
+
+summary(model3)
+confint(model3)
+```
+
+
+```{r}
+model4 <-lm(formula = MOOD ~ DEEP_MIN + LIGHT_MIN + REM_MIN + WAKE_MIN, data = df_MOOD_sleep_polar_MOOD_NZ_norm)
+summary(model4)
+par(mfrow=c(2,2))
+plot(model4)
+residuals4 <- residuals(model4)
+fitted_values <- fitted(model4)
+```
+
+
+
+```{r}
+model4_mem <-lmer(MOOD ~ DEEP_MIN + LIGHT_MIN + REM_MIN + WAKE_MIN + (1 | STUDY_PRTCPT_ID),    data = df_MOOD_sleep_polar_MOOD_NZ_norm)
+summary(model4_mem)
+#plot(model4_mem)
+```
+```{r}
+model4_mem_interact <- lmer(MOOD ~ DEEP_MIN + LIGHT_MIN + REM_MIN + WAKE_MIN + DEEP_MIN:REM_MIN + LIGHT_MIN:WAKE_MIN +
+                         (1 | STUDY_PRTCPT_ID),data = df_MOOD_sleep_polar_MOOD_NZ_norm)
+summary(model4_mem_interact)
+#plot(model4_mem_interact)
+
+```
+
+```{r}
+
+```
+
+
+
+```{r}
+library(lmerTest)
+# df_MOOD_sleep_polar_MOOD_NZ_norm$total_sleep_step <-df_MOOD_sleep_polar_MOOD_NZ_norm$SLEEP_COUNT * df_MOOD_sleep_polar_MOOD_NZ_norm$STEP_COUNT
+# 
+# model5 <- lmer(MOOD ~ DEEP_MIN + total_sleep_step + (1 | DAYOFWEEK), data = df_MOOD_sleep_polar_MOOD_NZ_norm)
+# 
+# summary(model5)
+```
+```{r}
+# df_MOOD_sleep_polar_mul <- df_MOOD_sleep_polar
+# df_MOOD_sleep_polar_mul$total_sleep_step  <- df_MOOD_sleep_polar_mul$ SLEEP_COUNT * df_MOOD_sleep_polar_mul$STEP_COUNT
+# columns_norm <- c('ASLEEP_VALUE', 'INBED_VALUE', 'DEEP_MIN', 'DEEP_COUNT', 
+#                       'LIGHT_MIN', 'LIGHT_COUNT', 'REM_MIN', 'REM_COUNT', 
+#                       'WAKE_MIN', 'WAKE_COUNT', 'STEP_COUNT', 'SLEEP_COUNT', 'MOOD', 'total_sleep_step')
+# 
+# df_MOOD_sleep_polar_mul_norm <- df_MOOD_sleep_polar_mul
+# 
+# df_MOOD_sleep_polar_mul_norm[columns_norm] <- as.data.frame(lapply(df_MOOD_sleep_polar_mul_norm[columns_norm], function(x) {
+#   (x - mean(x)) / sd(x)
+
+
+```
+
+```{r}
+# Fit the linear mixed effects model
+model6 <- lmer(MOOD ~ SLEEP_COUNT + STEP_COUNT + (1 + DAYOFWEEK| STUDY_PRTCPT_ID), data = df_MOOD_sleep_polar_MOOD_NZ_norm)
+summary(model6)
+
+```
+```{r}
+model7_a <- lmer(MOOD ~ ASLEEP_VALUE + WAKE_MIN + WAKE_COUNT + SLEEP_START_SIN + SLEEP_START_COS + STEP_COUNT + SLEEP_COUNT + (1 | STUDY_PRTCPT_ID), data = df_MOOD_sleep_polar_MOOD_NZ_norm)
+summary(model7_a)
+confint(model7_a)
+
+```
+
+
+
+```{r}
+model7 <- lmer(MOOD ~ DEEP_MIN + STEP_COUNT + (1 + DEEP_MIN + STEP_COUNT | STUDY_PRTCPT_ID), data = df_MOOD_sleep_polar_MOOD_NZ_norm)
+
+summary(model7)
+confint(model7)
+```
+
+
+```{r}
+model8 <- lmer(MOOD ~  ASLEEP_VALUE * WAKE_MIN * WAKE_COUNT * SLEEP_START_SIN * SLEEP_START_COS*    STEP_COUNT * SLEEP_COUNT + (1 | STUDY_PRTCPT_ID), data = df_MOOD_sleep_polar_MOOD_NZ_norm)
+summary(model8)
+confint(model8)
+```
+
+```{r}
+model9 <- lmer(MOOD ~  ASLEEP_VALUE * SLEEP_START_SIN * SLEEP_START_SIN* STEP_COUNT  + (1 | STUDY_PRTCPT_ID), data = df_MOOD_sleep_polar_MOOD_NZ_norm)
+summary(model9)
+confint(model9)
+
+```
+
+
+```{r}
+model12 <- lmer(MOOD ~  ASLEEP_VALUE * DEEP_MIN *  STEP_COUNT  + (1 | STUDY_PRTCPT_ID), data = df_MOOD_sleep_polar_MOOD_NZ_norm)
+summary(model12)
+confint(model12)
+```
+
+
+```{r}
+model13 <- lmer(MOOD ~  DEEP_MIN *  STEP_COUNT  + (1 | STUDY_PRTCPT_ID), data = df_MOOD_sleep_polar_MOOD_NZ_norm)
+summary(model13)
+confint(model13)
+```
+
+
+```{r}
+model13 <- lmer(MOOD ~  DEEP_MIN *  STEP_COUNT  + (1 + STEP_COUNT| STUDY_PRTCPT_ID), data = df_MOOD_sleep_polar_MOOD_NZ_norm)
+summary(model13)
+confint(model13)
+```
+
+
+```{r}
+model13 <- lmer(MOOD ~  DEEP_MIN *  STEP_COUNT  + (1 + DEEP_MIN| STUDY_PRTCPT_ID), data = df_MOOD_sleep_polar_MOOD_NZ_norm)
+summary(model13)
+confint(model13)
+```
+
