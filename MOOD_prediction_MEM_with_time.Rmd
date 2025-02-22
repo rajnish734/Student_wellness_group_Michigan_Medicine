@@ -1,0 +1,441 @@
+---
+title: "MOOD_prediction_MEM_with_time"
+author: "Rajnish Kumar"
+date: "`r Sys.Date()`"
+output: html_document
+---
+Using the MOOD dataset with entry time of the MOOD score available, along with type == 20 for steps count. 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r}
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(lubridate)
+library(Matrix)
+library(lme4)
+library(lme4)
+library(lmerTest)
+library(ggplot2)
+library(stringr)
+
+```
+
+
+
+Read files
+
+```{r}
+df_sleep <-read.csv('C:\\Users\\rajnishk\\OneDrive - Michigan Medicine\\Documents\\Student Wellness Dataset\\student_wellness_sleep_details.csv')
+df_MOOD_time_polar <- read.csv('C:\\Users/rajnishk/OneDrive - Michigan Medicine/Documents/Student Wellness Dataset/SWG_mood_time_entry.csv') # Dates variable has problems.
+df_MOOD <- read.csv('C:\\Users\\rajnishk\\OneDrive - Michigan Medicine\\Documents\\Student Wellness Dataset\\df_MOOD_SWG.csv')
+df_step_20 <- read.csv('C:\\Users/rajnishk/OneDrive - Michigan Medicine/Documents/Student Wellness Dataset/df_step_20.csv')
+
+```
+
+
+
+```{r}
+# df_mood <- read.csv('C:/Users/rajnishk/University of Michigan Dropbox/Rajnish Kumar/K24_NHLBI_Admin Supp/bmt_MOOD_TIME_ENTRY.csv')
+df_mood <- read.csv('C:/Users/rajnishk/OneDrive - Michigan Medicine/Documents/Student Wellness Dataset/mood_TIME_student_wellness_group.csv')
+df_mood$mood_score <- as.integer(df_mood$INT_SRVY_RSPNS)
+df_mood <- df_mood %>% filter(!is.na(mood_score))
+
+```
+df_MOOD_time_polar$mood_score <- as.integer(df_MOOD_time_polar$INT_SRVY_RSPNS)
+sum(df_MOOD_time_polar$INT_SRVY_RSPNS == "SELECTED", na.rm = TRUE) # There are NAs in the mood_score that come from these values. 
+
+df_MOOD_time_polar <- df_MOOD_time_polar %>%
+  filter(!is.na(mood_score))
+```{r}
+# See all unique time zones in your data
+tz_pattern <- "\\b[A-Z]{3,5}\\b"
+df_mood$time_zone <- str_extract(df_mood$INT_SRVY_RSPNS_DT, tz_pattern)
+df_mood$time_stamp <- do.call(c, lapply(1:nrow(df_mood), function(i) {
+  if(is.na(df_mood$time_zone[i])) {
+    as.POSIXct(df_mood$INT_SRVY_RSPNS_DT[i], format = "%Y-%m-%dT%H:%M:%S")
+  } else {
+    as.POSIXct(df_mood$INT_SRVY_RSPNS_DT[i], format = "%Y-%m-%d %H:%M:%S")
+  }
+}))
+```
+  
+In this group, the entries have only 6 different time zones, in BMT there were 9 different time zones of time entries. 
+
+participants have entered their MOOD scores multiple times a day. Let us confirm it first.   
+
+```{r}
+df_mood <- df_mood %>%
+  mutate(
+    mood_entry_date = as_date(time_stamp),
+    mood_entry_time = format(time_stamp, "%H:%M:%S")
+  )
+```
+
+
+```{r}
+detailed_multiple_entries <- df_mood %>%
+  group_by(STUDY_PRTCPT_ID, mood_entry_date) %>%
+  filter(n() > 1 | n_distinct(mood_score) > 1) %>%
+  arrange(STUDY_PRTCPT_ID, mood_entry_date)
+print("detailed multiple entries:")
+print(detailed_multiple_entries)
+
+```
+Pick only the highest entries of MOOD from participants for each day.  There will be further discussion on what value to pick. 
+
+```{r}
+particpant_entry_counts <- table(df_mood$STUDY_PRTCPT_ID)
+
+
+unique_combinations <- df_mood %>%
+  distinct(STUDY_PRTCPT_ID, mood_entry_date) %>%
+  nrow()
+
+print(paste("Number of unique combinations of STUDY_PRTCPT_ID and mood_entry_date:", unique_combinations))
+print(paste(unique_combinations,"out of", dim(df_mood)[1]," participant and mood score entry date are unique, and rest are extra entries which can possible be different from these mood score entries"))
+```
+
+
+
+```{r}
+
+# Find repeated entries
+repeated_entries <- df_mood %>%
+  group_by(STUDY_PRTCPT_ID, mood_entry_date) %>%
+  filter(n() > 1) %>%
+  ungroup()
+
+# Count the number of repeated rows
+num_repeated_rows <- nrow(repeated_entries)
+
+# Print the number of repeated rows
+cat("Number of repeated rows:", num_repeated_rows, "\n")
+
+# Store repeated entries in a separate data frame
+df_repeated <- repeated_entries
+
+# Print the first few rows of the new data frame
+print(head(df_repeated))
+```
+
+
+```{r}
+unique_combinations_multiple <- detailed_multiple_entries%>% distinct(STUDY_PRTCPT_ID,mood_entry_date)
+```
+
+```{r}
+ggplot(df_mood[df_mood$STUDY_PRTCPT_ID=='MLYS5U85',], aes(x = mood_score, fill = STUDY_PRTCPT_ID)) +
+  geom_density(alpha = 0.5) +
+  labs(title = "Density of Mood Scores by Participant", x = "Mood Score", y = "Density")
+```
+
+
+```{r}
+ggplot(df_mood, aes(x = mood_score, fill = STUDY_PRTCPT_ID)) +
+  geom_density(alpha = 0.5) +
+  labs(title = "Density of Mood Scores by Participant", x = "Mood Score", y = "Density")
+``` 
+
+
+```{r}
+ggplot(df_mood, aes(x=time_zone, y=mood_score)) +
+  geom_boxplot() + 
+  labs(title="Mood Scores by Time Zone", x="Time Zone", y="Mood Score") + facet_wrap(~STUDY_PRTCPT_ID)
+```
+```{r}
+ggplot(df_mood, aes(x=time_zone, y=mood_score)) +
+  geom_boxplot() + 
+  labs(title="Mood Scores by Time Zone", x="Time Zone", y="Mood Score")
+```
+
+
+
+
+
+```{r}
+time_zone_counts <- df_mood %>% count(time_zone)
+
+print(time_zone_counts)
+```
+
+
+```{r}
+df_mood$time_numeric <- as.numeric(df_mood$time_stamp)
+cor.test(df_mood$time_numeric, df_mood$mood_score)
+```
+
+
+```{r}
+ggplot(detailed_multiple_entries, aes(x = mood_score, fill = STUDY_PRTCPT_ID)) +
+  geom_density(alpha = 0.5) +
+  labs(title = "Density of Mood Scores by Participant", x = "Mood Score", y = "Density")
+```
+
+```{r}
+# library(lubridate)
+# library(dplyr)
+
+df_mood <- df_mood %>%
+  mutate(day_of_year = yday(mood_entry_date))
+```
+
+```{r}
+ggplot(df_mood, aes(x = day_of_year, y = mood_score)) +
+  geom_point() +
+  geom_smooth(method = "loess") +
+  labs(title = "Mood Score Throughout the Year", x = "Day of Year", y = "Mood Score")
+  # labs(title = "Mood Score Throughout the Year", x = "Day of Year", y = "Mood Score")+ facet_wrap(~STUDY_PRTCPT_ID) # mood_score is projected on a scale of 60 or so. 
+
+```
+
+
+```{r}
+df_mood <- df_mood %>%
+  mutate(season = case_when(
+    day_of_year >= 80 & day_of_year < 172 ~ "Spring",
+    day_of_year >= 172 & day_of_year < 264 ~ "Summer",
+    day_of_year >= 264 & day_of_year < 355 ~ "Fall",
+    TRUE ~ "Winter"
+  ))
+
+ggplot(df_mood, aes(x = season, y = mood_score)) +
+  geom_boxplot() +
+  labs(title = "Mood Scores by Season", x = "Season", y = "Mood Score")+ facet_wrap(~STUDY_PRTCPT_ID)
+  # labs(title = "Mood Scores by Season", x = "Season", y = "Mood Score")
+```
+
+
+```{r}
+# library(ggplot2)
+# library(dplyr)
+
+# First, calculate the count for each season
+season_counts <- df_mood %>%
+  group_by(season) %>%
+  summarise(count = n(), .groups = 'drop')
+
+# Create the plot
+ggplot(df_mood, aes(x = season, y = mood_score)) +
+  geom_boxplot() +
+  geom_text(data = season_counts, 
+            aes(y = max(df_mood$mood_score), label = paste("n =", count)),
+            vjust = -0.5) +
+  labs(title = "Mood Scores by Season", x = "Season", y = "Mood Score")
+```
+
+
+```{r}
+
+```
+
+
+
+```{r}
+hist(df_mood$mood_score, main="Distribution of Mood Scores", xlab="Mood Score")
+# Create histogram
+hist(df_mood$mood_score, main="Distribution of Mood Scores", xlab="Mood Score", 
+     probability=TRUE, col="lightgray", border="white")
+
+# Add density plot
+lines(density(df_mood$mood_score), col="blue", lwd=2)
+```
+
+
+```{r}
+
+
+```
+
+```{r}
+
+```
+
+
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+
+```{r}
+df_device_ID <- read.csv('C:\\Users/rajnishk/OneDrive - Michigan Medicine/Documents/Student Wellness Dataset/Device_ID_fitbits.csv')
+
+df_step_20 <- df_step_20 %>%
+  left_join(df_device_ID %>% select(PRTCPT_DVC_ID, PRTCPT_DVC_TYP_ID, STUDY_PRTCPT_ID),
+            by = c("PRTCPT_DVC_ID", "PRTCPT_DVC_TYP_ID"))
+```
+
+
+```{r}
+df_step_20$STUDY_METRIC_MSR_START_DT <- as.Date(df_step_20$STUDY_METRIC_MSR_START_DT)
+df_step_20$STUDY_METRIC_MSR_END_DT <- as.Date(df_step_20$STUDY_METRIC_MSR_END_DT)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+```{r}
+
+df_MOOD_time_polar$mood_score <- as.integer(df_MOOD_time_polar$INT_SRVY_RSPNS)
+sum(df_MOOD_time_polar$INT_SRVY_RSPNS == "SELECTED", na.rm = TRUE) # There are NAs in the mood_score that come from these values. 
+print("The NAs in the mood_score come from sum(is.na(df_MOOD_time_polar$mood_score))")
+sum(is.na(df_MOOD_time_polar$mood_score))
+```
+```{r}
+
+df_MOOD_time_polar <- df_MOOD_time_polar %>%
+  filter(!is.na(mood_score))
+```
+
+
+```{r}
+df_MOOD_time_polar$Date <- as.Date(df_MOOD_time_polar$Date, format = "%Y-%m-%d")
+df_sleep$SLEEP_DATE <- as.Date(df_sleep$SLEEP_DATE, format = "%Y-%m-%d")
+
+```
+
+prediction of MOOD using mixed effect model as well as a regression model, just from time of entry. 
+
+```{r}
+library(lme4)
+library(lmerTest)  # For p-values in the output
+mixed_model <- lmer(mood_score ~ time_normalized_SIN + time_normalized_COS + (1|STUDY_PRTCPT_ID), data = df_MOOD_time_polar)
+
+print("model summary from summary(mixed_model)")
+summary(mixed_model)
+print("more details from anova(mixed_model)")
+anova(mixed_model)
+print("confidence intervals from confint(mixed_model)......")
+confint(mixed_model)
+print("more diagnostics from plot(mixed_model).......")
+plot(mixed_model)
+# print("random effects from ranef(mixed_model)...")
+# ranef(mixed_model)
+
+```
+
+
+```{r}
+mixed_model_interaction <- lmer(mood_score ~ time_normalized_SIN * time_normalized_COS + (1|STUDY_PRTCPT_ID), 
+                                data = df_MOOD_time_polar)
+print("model summary from summary(mixed_model_interaction)")
+summary(mixed_model_interaction)
+print("more details from anova(mixed_model_interaction)")
+anova(mixed_model_interaction)
+print("confidence intervals from confint(mixed_model_interaction)......")
+confint(mixed_model_interaction)
+```
+
+
+```{r}
+
+set.seed(123)  # for reproducibility
+
+df_MOOD_time_polar <- df_MOOD_time_polar %>%
+  mutate(
+    time_normalized_SIN_jitter = time_normalized_SIN + 0.1 * rnorm(n()),
+    time_normalized_COS_jitter = time_normalized_COS + 0.1 * rnorm(n())
+  )
+# ggplot(df_MOOD_time_polar, aes(x = time_normalized_COS_jitter, 
+#                                y = time_normalized_SIN_jitter, 
+#                                color = factor(mood_score))) +
+#   geom_point() +
+#   geom_text(aes(label = 1:nrow(df_MOOD_time_polar)), hjust = 1.5, vjust = 1.5) +
+#   scale_color_discrete(name = "self reported mood score") +
+#   labs(title = "Caregiver (n=5/year)",
+#        x = "time_normalized_COS",
+#        y = "time_normalized_SIN") +
+#   theme_minimal() +
+#   coord_fixed(ratio = 1) +
+#   xlim(-1.5, 1.5) +
+#   ylim(-1.5, 1.5)
+
+```
+```{r}
+# Create a dataframe for hour labels
+hour_labels <- data.frame(
+  hour = 0:23,
+  x = cos(2 * pi * (0:23) / 24),
+  y = sin(2 * pi * (0:23) / 24)
+)
+
+ggplot(df_MOOD_time_polar, aes(x = time_normalized_COS_jitter, 
+                               y = time_normalized_SIN_jitter, 
+                               color = factor(mood_score))) +
+  geom_point(alpha = 0.5) +  # Added alpha for transparency
+  scale_color_discrete(name = "mood score") +
+  geom_text(data = hour_labels, aes(x = x, y = y, label = hour), 
+            color = "black", size = 3, inherit.aes = FALSE) +
+  labs(title = "Student Wellness Group",
+       x = "time_normalized_COS",
+       y = "time_normalized_SIN") +
+  theme_minimal() +
+  coord_fixed(ratio = 1) +
+  xlim(-1.5, 1.5) +
+  ylim(-1.5, 1.5) +
+  theme(panel.grid.major = element_line(color = "gray", linetype = "dashed"),
+        panel.grid.minor = element_line(color = "lightgray", linetype = "dotted"))
+        plot.title = element_text(hjust = 0.5)  # This centers the title
+
+```
+```{r}
+df_mood_step_sleep_SWG <- df_MOOD_time_polar %>%
+  inner_join(df_sleep, by = c("STUDY_PRTCPT_ID", "Date" = "SLEEP_DATE")) %>%
+  inner_join(df_step_20, by = c("STUDY_PRTCPT_ID", "Date" = "STUDY_METRIC_MSR_START_DT"))
+```
+```{r}
+# Checking the duplicates in the mood entry data set. 
+duplicate_check <- df_MOOD_time_polar %>%
+  group_by(STUDY_PRTCPT_ID, Date) %>%
+  summarise(count = n(), .groups = 'drop') %>%
+  filter(count > 1)
+
+# View the result
+print(duplicate_check)
+
+# Get the total number of duplicates
+total_duplicates <- nrow(duplicate_check)
+print(paste("Total number of STUDY_PRTCPT_ID and Date combinations with duplicates:", total_duplicates))
+```
+
